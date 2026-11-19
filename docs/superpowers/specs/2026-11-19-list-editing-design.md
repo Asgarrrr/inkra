@@ -1,7 +1,8 @@
 # List editing: `↩`, `⇥`, `⇧⇥` and `⌫` in lists and quotes
 
-Date: 2026-11-19. Status: **proposed**, awaiting review. No code yet. The owner approved the scope
-("chantier A") on 2026-11-19, after an audit of list typing. Open questions 1–7 wait on the owner.
+Date: 2026-11-19. Status: **proposed**, revised after a red-team review (History). No code yet.
+The owner approved the scope ("chantier A") on 2026-11-19, and decided Open questions 1–7 and 9 the
+same day. Open question 8 waits on the owner.
 
 ## Why
 
@@ -14,8 +15,7 @@ Typing a list is poor, because the editor has no list-aware command. Checked aga
   input and insert `\t`, the audit found. A `⇧⇥` that writes a byte is a data bug.
 - `⌫` at an item's text start deletes one byte. `- abc` becomes `-abc`, and `- [ ] abc` becomes
   `- [ ]abc`: the markup turns to text.
-- Typed by hand, a nested marker passes through `CommonMark` states that look broken: in `- a\n  -`
-  the `-` is a setext underline, so `a` shows as a level-2 heading.
+- Typed by hand, a nested marker passes through `CommonMark` states that look broken (D8).
 
 ## Decisions taken
 
@@ -26,47 +26,62 @@ By the owner, on 2026-11-19.
    level when it is nested. `⇥` and `⇧⇥` indent and outdent the whole item. `⌫` at the text start
    removes the markup. `↩` inside `> ` continues the quote.
 2. **Chantier B is out of scope.** Changes to the reveal rule are in Deferred.
+3. **The parse stays `CommonMark`** (Open question 1). The commands still read a marker on a line
+   where no item opens, through the one-line fallback `⌘L` uses (D8).
+4. **A marker that changes width shifts its item's other lines** in the same batch, so the
+   structure holds (Open question 9, D7).
+5. **Renumbering follows CodeMirror**: only while the old numbers ran in sequence (Open question 2,
+   D6).
+6. **`↩` at the end of an item with children** writes a new sibling right after the marker line's
+   text; the children become its children, as in Obsidian (Open question 3).
+7. Open questions 4–7 are decided as recommended: `⌫` on an empty item deletes its line; `⇧⇥` works
+   in place; `⌫` at a bullet's text start deletes the marker; `⇥` on a first item does nothing.
 
 ## Terms
 
 This spec reuses the task boxes spec's terms (`2026-11-16-task-boxes-design.md`, Terms): **gutter
-item**, **marker line**, **item part**, **text start**, **content start**, **opener**, **hang
-column**, **atom**. It adds:
+item**, **marker line**, **item part**, **text start**, **content start**, **opener**, **leaf text
+start**, **atom**, **fallback**. It adds:
 
 - **list command**: `↩`, `⇥`, `⇧⇥` or `⌫` as this spec defines them, as opposed to the **plain
   key**, the behaviour on `main`.
 - **held line**: a line that a gutter item holds and on which no item opens. Its item part has no
   mark.
-- **caret item**: the innermost gutter item that opens on, or holds, the caret's line.
-- **empty item**: a gutter item whose marker line has only blanks past its text start, and that
-  holds no other line. `- `, `1. ` and `- [ ] ` are empty items.
+- **list**: the run of items one `Start(List)` event opens. pulldown-cmark opens a new list when the
+  marker kind changes, and when a block outside the list ends it.
+- **sibling**: an item of the same list. The **previous sibling** is the nearest one above.
+- **holder**: the innermost gutter item that holds a line: the last item whose marker lies before
+  the line, walked up through its parents until one ends past the line's start (D1).
+- **caret item**: the item that opens on the caret's line, the innermost when several do, else the
+  line's holder.
+- **fallback item**: an empty marker that the fallback reads on a line where no item opens (D8).
+- **empty item**: a gutter item, or a fallback item, whose marker line has only blanks past its text
+  start, and that holds no other line. `- `, `1. ` and `- [ ] ` are empty items.
 - **quote part**: the gutter's bytes from the line's start through its last `>` and the one blank
   after it (`Gutter::quote_end`, `crates/markdown/src/gutters.rs:66-68`).
 - **block**: an item's marker line and every line it holds, its children included: from the line
   start of its marker to its range's end.
-- **sibling**: an item with the same parent item, or with no parent, as another. The **previous
-  sibling** is the nearest one above.
 - **marker kind**: a bullet's byte (`-`, `*`, `+`), or an ordered marker's delimiter (`.`, `)`).
-  pulldown-cmark starts a new list when the kind changes.
 - **renumber**: rewrite the digits of the ordered siblings after an edited item (D6).
+- **width shift**: the blanks a batch adds to, or removes from, an item's other lines when its
+  content column moves (D7).
 
 ## Context
 
-- `toggle_task` is the precedent (`actions.rs:174-183`). It reads the cached parse with
-  `parses::parsed`, passes it with the text and the selection to `cycle_tasks`
-  (`crates/markdown/src/cycle.rs:38-72`), and applies the returned hunks as one `Diff` through
-  `EditorState::apply_diff`. `inkra-markdown` computes the edit from the parse, the app binds the
-  key, and `inkra-editor` reads no markdown (task boxes spec, D6).
+- `toggle_task` is the precedent (`actions.rs:174-183`). It reads the cached parse, passes it with
+  the text and the selection to `cycle_tasks` (`crates/markdown/src/cycle.rs:38-72`), and applies
+  the returned hunks as one `Diff` through `EditorState::apply_diff`. `inkra-markdown` computes the
+  edit from the parse, the app binds the key, and `inkra-editor` reads no markdown (task boxes
+  spec, D6).
 - `Buffer::apply_diff` (`crates/text/src/diff.rs:179-190`) is one undo step that merges with no
-  typing on either side. `EditorState::apply_diff` maps the selection through it
-  (`crates/editor/src/state.rs:296-319`): a caret lands after an insertion at its offset, and at
-  the start of a deleted range that holds it.
+  typing on either side. It edits nothing when the buffer's version is not the diff's base.
+  `EditorState::apply_diff` maps the selection through it (`crates/editor/src/state.rs:296-319`): a
+  caret lands after an insertion at its offset, and at the start of a deleted range that holds it.
 - `Structure::items` holds each item's marker only (`crates/markdown/src/structure.rs:14-24`). It
-  has no end and no parent. `Gutter::item` gives a line's item part, its task and whether it is
-  marked (`gutters.rs:12-37`).
-- The shared keys bind once, in the `TextInput` context: `backspace` among them
-  (`keymap.rs:41`, handler at `crates/app/src/text_input/actions.rs:29-35`). A host binds only its
-  own keys, and `keymap/tests.rs` fails on a key bound in both (`.claude/rules/editor.md`).
+  has no end, no parent and no list.
+- The shared keys bind once, in the `TextInput` context: `backspace` among them (`keymap.rs:41`,
+  handler at `crates/app/src/text_input/actions.rs:29-35`). A host binds only its own keys, and
+  `keymap/tests.rs` fails on a key bound in both (`.claude/rules/editor.md`).
 - `enter` binds `Newline` in the editor context and `Confirm` in the field context
   (`keymap.rs:60`, `:87`). `Newline` is on the palette's hide list
   (`crates/app/src/command_palette/commands.rs:28`).
@@ -77,14 +92,13 @@ Yes, in every path a user reaches.
 
 - `edit_buffer` calls `after_edit`, and the editor's reshapes (`.claude/rules/editor.md`).
   `reshape` calls `refresh` first (`crates/app/src/editor/mod.rs:169-180`). `refresh` parses when
-  the buffer's version moved (`mod.rs:135-161`).
+  the buffer's version moved, and records it in `parsed_at` (`mod.rs:135-161`).
 - A write that bypasses `edit_buffer`, such as a reload, reaches `refresh` through
   `on_buffer_changed` (`mod.rs:164-167`).
-- `parses::parsed` returns the cached parse for the buffer's current version, and parses once on a
-  miss (`crates/app/src/editor/parses.rs:23-48`).
 
-So a list command reads the parse that the previous edit already paid for. It runs no extra
-pulldown-cmark pass (Performance).
+So a list command reads `EditorView::markdown`, the parse the previous edit already paid for, and
+runs no pass over the note. It stamps its `Diff` with `parsed_at`, not with the buffer's version
+(D9). A parse that lags the text then fails `apply_diff`, and the command edits nothing.
 
 ## What the references do
 
@@ -106,8 +120,7 @@ Zed reads lists by line prefix, from the language config, not from a parse.
   (`ClearCurrentLine`), or outdents it by one tab stop and keeps the marker, `1.` for a number
   (`UnindentCurrentLine`, 2735-2744, 2780-2789). A caret before or inside the prefix inserts a plain
   newline.
-- The newline edit itself is built at `input.rs:662-741`. `ClearCurrentLine` replaces the row with
-  nothing; `UnindentCurrentLine` rewrites the indent less one `outdent_len`.
+- The newline edit itself is built at `input.rs:662-741`.
 - Its tests pin this: `test_newline_unordered_list_continuation`
   (`crates/editor/src/editor_tests.rs:46476-46642`), task and ordered cases at 46341 and 46645. Case
   3 splits `- it|em` into `- it` and `- em`; cases 6 and 7 outdent, then clear, an empty nested item.
@@ -143,10 +156,11 @@ From knowledge; Obsidian is closed source.
 - `↩` continues a bullet, a number plus one, and a task as `- [ ] `. Sure.
 - `↩` on an empty item removes the marker, and outdents it first when nested. Likely; unsure of
   the nested case.
+- `↩` at the end of an item with children writes a new item that takes the old item's children.
+  The owner states it (decision 6).
 - `⇥` and `⇧⇥` indent and outdent an item with its children. By default it indents with a tab
   character ("Indent using tabs"). Sure of the move, unsure of the default today.
 - It renumbers an ordered list after an insertion. Unsure.
-- `⌫` right after an empty `- `: unsure whether it removes the marker or the line.
 
 ## D1. The data
 
@@ -161,24 +175,37 @@ pub struct Item {
     pub end: ByteOffset,
     /// Its parent item's index in `Structure::items`; `None` for a top-level item.
     pub parent: Option<u32>,
+    /// Its list: the index of its `Start(List)` among the note's lists, in document order.
+    pub list: u32,
 }
 ```
 
-- `Tag::Item`'s range is known at its `Start` event, so `end` costs nothing.
-- The collector keeps a stack of open items' indices. At each `Start(Item)` it pops the items whose
-  `end` lies at or before the new item's start; the top is the parent. That needs no `End` event.
-- `cycle.rs:120-123` reads `.marker` instead of the bare offset. `innermost_item` reads the last
-  item's `.marker` (`structure.rs:82-90`).
-- The previous sibling of item `i`: walk `j = i - 1`, then up its parents, until an item with `i`'s
-  parent. Reaching `i`'s parent means there is none. That costs the depth, never the list.
-- The next siblings of item `i`: the items after `i` whose marker lies at or past `i`'s `end` with
-  `i`'s parent, until the parent's `end`. Only renumbering walks them (D6).
-- The caret item comes from the caret line's gutter, found by one binary search over `gutters` as
-  `Markdown::task_at` does (`gutters.rs:109-120`). Its marker is the last of `items` at or before
-  the line's text start, and its index follows from one more binary search.
+- A `Start` event carries its element's whole range, so `end` costs nothing.
+- The collector keeps two stacks, of open items and of open lists, each entry with its range's end.
+  At each `Start(Item)` or `Start(List)` it pops the entries that end at or before the new start;
+  the tops are the parent and the list. That needs no `End` event, and `Collector::start` already
+  sees every `Start` (`structure.rs:33-51`).
+- Siblings share `list`, not merely `parent`. `1. a\n\npara\n\n2. x` is two lists, and in
+  `> - a\n\n- b` the second item is the first of its own list.
+- The previous sibling of item `i` is the nearest item above with `i`'s `list`, found by walking
+  `j = i - 1` and then up its parents. Reaching `i`'s parent means there is none. That costs the
+  depth.
+- The next siblings of item `i` are the items after `i`'s `end` with `i`'s `list`, until the list's
+  last item. Only renumbering and the width shift walk them.
+- The holder of a line starting at `s`: the last item whose marker lies before `s`, then up its
+  `parent` chain until an item's `end` lies past `s`. In `- a\n  - b\n\n  c`, `c`'s holder is `a`,
+  not `b`. The caret line's gutter is found by one binary search over `gutters`, as
+  `Markdown::task_at` does (`gutters.rs:109-120`), and the item by one more over `items`.
 
-Why `end` and `parent` and not a tree: the vector stays flat and sorted, as `cycle.rs` reads it, and
-an item's relatives cost its depth.
+The readers of `Structure::items` change with it:
+
+- `cycle.rs:120-123` reads `.marker`.
+- `cycle.rs:214-215` maps the markers through the splices and binary-searches the copy's items by
+  `.marker` (`binary_search_by_key`).
+- `parse.rs:152` passes `structure.items()` to `Items::gutters`, which indexes it by marker. It takes
+  `&[Item]` and reads `.marker`, so no projected `Vec<ByteOffset>` is built.
+- `items.rs:18` and `items.rs:41` name `structure.items` in doc comments; they keep their meaning.
+- `innermost_item` reads the last item's `.marker` (`structure.rs:82-90`).
 
 ## D2. `↩`
 
@@ -187,47 +214,73 @@ the app inserts the plain `\n` as today. The rules, first match wins:
 
 1. **A selection, or marked text, takes the plain key.** Zed and CodeMirror do the same. The
    selection is replaced by `\n`, as on `main`.
-2. **A caret inside a code block.** The new line copies the caret line's quote part and fills the
-   item columns with blanks up to the hang column of the caret item, so the code stays in the
-   item. No marker is written. A code block outside every item and quote takes the plain key. A
-   marker line whose text opens a fence counts as inside: `- ```rust|` writes `\n  `.
-3. **A caret on a held line.** The new line copies the line's bytes from its start to its text
-   start: its quote part and its hidden blanks. So `- a\n  b|` gives `- a\n  b\n  |`, a new line
-   in the same paragraph. With the caret at the text start, the `\n` goes before those bytes, so no
-   line is left with blanks only. A lazy line copies its own prefix, which may be empty: the user
-   wrote it lazy.
-4. **A caret on an empty item's line, at or past its text start** (D3).
-5. **A caret on a marker line, at or past its text start.** The edit replaces the blanks just
-   before the caret, down to the text start at most, with `\n` and the **continuation**:
+2. **A caret on a held line**, a code line included. The new line copies the line's bytes from its
+   start to its text start: its quote part and its item part. A code line's item part ends at its
+   leaf text start (task boxes spec, D11), so the code keeps its place in the item and no marker is
+   written:
+   - `- a\n  b|` gives `- a\n  b\n  |`, a new line of the same paragraph;
+   - a task's fenced code, `- [ ] a\n  ```\n  x|`, gives a new code line at column 2, where the
+     code starts, not at the box's hang column 6;
+   - an indented code block in an item, `- a\n\n      x|`, gives a new line with the six blanks,
+     still code.
+
+   With the caret at the text start, the `\n` goes before those bytes, so no line is left with
+   blanks only. A lazy line copies its own prefix, which may be empty: the user wrote it lazy.
+3. **A caret on a marker line inside a code block**: a marker line whose text opens a fence. The
+   new line copies the quote part and fills spaces up to the content start's column. `- ```rust|`
+   gives `- ```rust\n  |`.
+4. **A code block outside every item and quote** takes the plain key.
+5. **A caret on an empty item's line, at or past its text start** (D3). A fallback item counts
+   (D8).
+6. **A caret on a marker line, past its text start.** The edit replaces the blanks just before the
+   caret, down to the text start at most, with `\n` and the **continuation**:
    - the marker line's quote part, copied;
    - the bytes from the item part's start to the caret item's marker, copied when they are blanks
      only, else spaces up to the marker's column (`- - a` continues as `  - `);
    - the marker: the same bullet byte, or the number plus one with the same delimiter, its digits
-     zero-padded to the old count (`09.` gives `10.`, `01.` gives `02.`);
+     zero-padded to the old count (`01.` gives `02.`);
    - the blanks between the marker and the content start, copied, or one space when the marker
      line has five columns or more (`CommonMark` 5.2, as `checkbox_at` counts them,
      `cycle.rs:148-162`);
    - for a task, `[ ] ` and nothing else: a checked task continues unchecked.
 
    The text after the caret moves to the new item: that is the split. `- it|em` gives
-   `- it\n- |em`. Every line the old item held after the caret, and its children, move with it
-   (Open question 3).
-6. **A caret on a quote line with no item part.** The new line copies the quote part:
+   `- it\n- |em`. Every line the old item held after the caret moves with it:
+   - its children become the new item's children (decision 6): `- a|\n  - c` gives
+     `- a\n- |\n  - c`;
+   - a held line stays held, now by the new item;
+   - a lazy line after the caret is part of the item's text, so it moves too. When the new item's
+     marker line is empty, a lazy line would drop out of the list, so the batch indents each such
+     line to the new item's content column: `- a|\nb` gives `- a\n- |\n  b`.
+
+   When the new marker is wider than the old (`9.` to `10.`), the lines that move take the width
+   shift (D7).
+7. **A caret at a marker line's text start, with text after it.** The continuation would leave an
+   empty item above the text, and an empty item cannot interrupt a paragraph (D8). So:
+   - when the caret item is not its list's first item, the edit writes an empty sibling above: the
+     continuation's bytes and a `\n`, at the marker line's start. The new item takes the caret
+     item's number, and the caret item and those below renumber (D6). The caret stays on the text.
+     `- a\n- |b` gives `- a\n- \n- |b`.
+   - when it is its list's first item, the edit writes a `\n` at the marker line's start instead: a
+     blank line above, which keeps the item an item. `para\n- |abc` gives `para\n\n- |abc`, and
+     `- p\n  - |abc` gives `- p\n\n  - |abc`. An empty item there would read as `p` with a setext
+     underline, or as paragraph text.
+8. **A caret on a quote line with no item part.** The new line copies the quote part:
    `> a|` gives `> a\n> |`. An empty quote line, blanks only past its quote part, loses its
    innermost `>` and the blank after it instead: `> > |` gives `> |`, and `> |` gives an empty
    line, so the quote ends.
-7. **A caret before the text start** of a marker line, in a revealed item part, takes the plain key.
+9. **A caret before the text start** of a marker line, in a revealed item part, takes the plain key.
    `|- a` moves the item down a line, as in Zed (case 8).
-8. **A line holding an opener past its text start** takes the plain key. In `- > - a` the inner
-   item is no gutter item; continuing the outer item there would be a guess.
+10. **A line holding an opener past its text start** takes the plain key. In `- > - a` the inner
+    item is no gutter item; continuing the outer item there would be a guess.
 
-Quote and list combine through rule 5's first bullet: `> - a|` gives `> - a\n> - |`, and
+Quote and list combine through rule 6's first bullet: `> - a|` gives `> - a\n> - |`, and
 `> 1. [x] a|` gives `> 1. [x] a\n> 2. [ ] |`.
 
 An ordered continuation renumbers the siblings below it (D6).
 
-**The caret** lands after the continuation, at the new item's text start. `apply_diff` puts it there
-with no extra field: the continuation is an insertion at the caret's offset.
+**The caret** lands at the new item's text start (rule 6), or stays on its text (rule 7).
+`apply_diff` puts it there with no extra field.
 
 ## D3. `↩` on an empty item
 
@@ -236,9 +289,10 @@ with no extra field: the continuation is an insertion at the caret's offset.
   ends. `> - |` gives `> |`, and the quote goes on: one level per `↩`.
 - **Nested**: the item outdents one level, as `⇧⇥` does (D4). `- a\n  - b\n  - |` gives
   `- a\n  - b\n- |`. A second `↩` then leaves the list.
+- A fallback item is nested when its line has a holder (D8).
 - The caret lands at the line's new text start: the quote part's end at the top level, the
   outdented item's text start when nested.
-- An empty item that holds a child is no empty item: its marker line falls under D2's rule 5.
+- An empty item that holds a child is no empty item: its marker line falls under D2's rule 6.
 
 Zed and CodeMirror agree on both cases. CodeMirror's `nonTightLists` blank line is not followed: a
 note app's lists are tight by habit (Deviations).
@@ -255,10 +309,12 @@ move.
 
 **The items.** The lines the selection touches, by `⌘L`'s rule: the first, then each later line
 that starts before the selection's end (task boxes spec, D6, (H)). Each line gives its caret item,
-on a marker line or a held line. An item whose ancestor is also given moves with that ancestor
-only. Consecutive siblings among the given items form a **run**.
+on a marker line or a held line. A line inside a code block gives none, so a caret or a selection
+inside an item's code never moves the item. An item whose ancestor is also given moves with that
+ancestor only. Consecutive siblings among the given items form a **run**.
 
-**`⇥` on a run.** The run's first item needs a previous sibling, which becomes the run's parent.
+**`⇥` on a run.** The run's first item needs a previous sibling, in its own list, which becomes the
+run's parent.
 
 - The shift is that sibling's content column less the first item's marker column, in columns from
   the line's start. So the run's markers land on the new parent's content column, which `CommonMark`
@@ -270,9 +326,12 @@ only. Consecutive siblings among the given items form a **run**.
 - **The marker kind.** When the new parent already has children, each moved marker takes the kind
   of its last child, so the run joins that list: a bullet takes its byte, a number takes the last
   number plus one, then counts up. Else a bullet keeps its byte and a number restarts at `1` with
-  its own delimiter.
+  its own delimiter. A marker whose width changes takes the width shift (D7).
 - A run whose first item has no previous sibling does not move. Nothing else is written: a first
-  item cannot become a child (Open question 7).
+  item cannot become a child (decision 7). In `> - a\n\n- b`, `b` is the first of its list, so `⇥`
+  writes nothing; a shift there made indented code.
+- `⇥` on an empty fallback item writes nothing: its marker already sits where the parse will read
+  a child once text arrives.
 
 **`⇧⇥` on a run.** The run's items need a parent; they become its siblings, right after it in the
 source.
@@ -281,12 +340,15 @@ source.
   that many columns of blanks from the start of every line of the run's blocks, after the quote
   part. A line with fewer leading blanks, such as a lazy line, loses all it has. When the cut falls
   inside a tab, that line's leading blanks are first rewritten as spaces.
-- The siblings after the run stay where they are in the source. Their indent now puts them under
-  the last outdented item, so they become its children (Open question 5). That is what a text
-  shift does in Zed and CodeMirror, and it moves no line.
 - **The marker kind.** Each outdented marker takes the parent's kind: the parent's bullet byte, or
   the parent's number plus one, then counting up.
+- **The adopted siblings.** The siblings after the run stay in place in the source, and become the
+  last outdented item's children (decision 7). The same batch makes them parse as its children:
+  - their blocks take the width shift to the new parent's content column (D7);
+  - an ordered run of them renumbers from `1`, since a list that starts past `1` cannot interrupt
+    the new parent's paragraph. `- a\n  1. b\n  2. c` with `⇧⇥` on `b` gives `- a\n- b\n  1. c`.
 - A top-level item does not move, and `⇧⇥` writes nothing. Leaving the list is `⌫`'s job (D5).
+- An empty fallback item outdents to its holder's marker column with the holder's kind (D8).
 
 **Off a list.** `⇧⇥` never inserts a byte, anywhere. `⇥` falls back as follows:
 
@@ -304,13 +366,13 @@ An ordered item that changes level renumbers the siblings it leaves and the ones
 ## D5. `⌫` at the text start
 
 `remove_markup(text, markdown, caret) -> Option<Vec<Hunk>>`, for an empty selection with the caret
-at a marker line's text start. Any other `⌫` takes the plain key, the D2 atom included: a held
-line's `⌫` still joins it to the line above (task boxes spec, D2). One step per press, first match
-wins:
+at a marker line's text start, a fallback item's included. Any other `⌫` takes the plain key, the
+D2 atom included: a held line's `⌫` still joins it to the line above (task boxes spec, D2). One step
+per press, first match wins:
 
 1. **An empty item** (`- |`, `1. |`, `- [ ] |`): the edit deletes the line's item part, its
    trailing blanks, and the `\n` before the line, so the caret lands at the previous line's end. So
-   `↩` then `⌫` on an empty continued item restores the text and the caret (Open question 4). On a
+   `↩` then `⌫` on an empty continued item restores the text and the caret (decision 7). On a
    note's first line, only the item part goes. A quoted empty item keeps its quote part:
    `> - a\n> - |` gives `> - a|`.
 2. **A task**: the checkbox and the one blank after it go. `- [ ] abc` gives `- abc`, and
@@ -319,7 +381,8 @@ wins:
    bytes before the marker stay, the quote part and the ancestors' indent. So `- a\n- |b` gives
    `- a\n|b`, a lazy line of `a`'s paragraph, which D11 already paints at `a`'s text. `- a\n  - |b`
    gives `- a\n  |b`, a held line of `a`. A top-level first item gives a paragraph. A further `⌫`
-   reaches the atom or the plain key and joins the line above (Open question 6).
+   reaches the atom or the plain key and joins the line above (decision 7). The item's own held
+   lines and children stay where they are; they now follow the line as continuation lines.
 
 A removed ordered marker renumbers the siblings below it (D6).
 
@@ -334,8 +397,8 @@ fn backspace_markup(&self, cx: &App) -> Option<Diff> {
 ```
 
 The shared handler applies the `Diff` through `apply_diff` when one comes back, else calls
-`EditorState::backspace` as today. `EditorView`'s returns `remove_markup`'s hunks as a `Diff` at the
-buffer's version. `NameField` takes the default. The trait already has two implementers, so this
+`EditorState::backspace` as today. `EditorView`'s returns `remove_markup`'s hunks as a `Diff` at
+`parsed_at` (D9). `NameField` takes the default. The trait already has two implementers, so this
 adds no trait with one.
 
 **Delete and `⌘⌫`** are out of scope (Deferred). `⌘⌫` has no editor binding (`keymap.rs:72` is the
@@ -344,45 +407,109 @@ sidebar's).
 ## D6. Renumbering
 
 After an edit adds, removes or moves an ordered item, the siblings of that item's list below the
-edit get new digits, CodeMirror's rule (Open question 2):
+edit get new digits, CodeMirror's rule (decision 5):
 
 - The walk starts at the first sibling after the edit, with the number the edited list now expects
-  there. It rewrites a sibling's digits only, zero-padded to that sibling's own digit count.
+  there. It rewrites a sibling's digits, zero-padded to that sibling's own digit count.
 - It stops at the first sibling whose number was not the previous one plus one before the edit, or
   whose marker kind differs. So a list the user numbers by hand, as `1. 1. 1.` or `1. 5. 9.`, is
   left alone.
-- D4's two lists both renumber: the one an item leaves and the one it joins.
-- The hunks are added to the command's own batch, so the whole command stays one undo step.
+- D4's two lists both renumber: the one an item leaves and the one it joins. An adopted ordered run
+  restarts at `1` (D4).
+- A sibling whose digit count changes takes the width shift (D7).
+- The hunks join the command's own batch, so the whole command stays one undo step.
 
 The walk costs the edited list's later siblings and their descendants, never the note.
 
-## D7. The app
+## D7. The width shift
+
+A marker's width sets its item's content column. When a command changes it, the item's other lines
+would leave the item or turn lazy: `9. a\n   b` renumbered to `10.` puts `b` at column 3, before
+the content column 4. So the same batch shifts them (decision 4).
+
+- It applies to every marker a command rewrites: a renumbered sibling, a marker that takes a new
+  kind under `⇥` or `⇧⇥`, a new continuation's moved lines (D2, rule 6), and adopted siblings (D4).
+- The shift is the new content column less the old one. Every line of the item's block but its
+  marker line takes it, after the quote part, as D4 inserts or cuts blanks. Blank lines take none.
+- Its hunks join the command's batch, so the command stays one undo step.
+- The hunks of one command never overlap: a line takes the sum of the shifts of the items that hold
+  it, written as one hunk.
+
+## D8. A marker the parse reads as no item
+
+An empty item cannot interrupt a paragraph (`CommonMark` 5.2). Checked with pulldown-cmark 0.13.6:
+
+- `- a\n  - ` reads the `-` as a setext underline, so `a` shows as a level-2 heading. Only `-` does
+  this.
+- `- a\n  * `, `- a\n  + ` and `1. a\n   1. ` read the marker as paragraph text, `a *`, with no item.
+- The same holds at the top level after a paragraph: `para\n- ` and `para\n* `.
+
+The parse stays `CommonMark` (decision 3): the screen shows the heading or the text until the first
+letter, which makes the line an item. The commands still read the marker:
+
+- On a line where no item opens and that holds no code, the commands run the fallback
+  (`innermost_item`, `structure.rs:82-90`) on the line's text past its quote part and leading
+  blanks, padded as `cycle.rs:168-176` pads it. A marker it finds with nothing after it is a
+  **fallback item**.
+- A fallback item's holder is the line's holder (D1), and its marker column is its own.
+- `↩` treats it as an empty item (D3): nested under a holder, it outdents; with none, it leaves the
+  list. `- p\n  - |` gives `- p\n- |`, and the heading is gone.
+- `⇧⇥` outdents it to its holder's marker column, with the holder's kind (D4). With no holder it
+  writes nothing.
+- `⌫` deletes its line (D5, rule 1).
+- `⇥` writes nothing (D4).
+- A fallback marker with text after it, as a lazy `para\n2. b`, is not a fallback item; the line
+  takes the held-line or plain rules.
+
+The fallback is one pulldown-cmark pass over one line, and runs only on the caret's line when no
+item opens there.
+
+## D9. The app
 
 - `newline` (`actions.rs:138-141`): with an empty selection and no marked text, it calls
-  `continue_list` on the cached parse. `Some(hunks)` goes through `apply_diff`, as `toggle_task`
-  does; `None` inserts `\n` through `EditorState::insert`, so a plain `↩` still merges with typing.
-- `indent_item` and `outdent_item`: the same shape, with `D4`'s fallbacks.
+  `continue_list` on `EditorView::markdown`. `Some(hunks)` becomes a `Diff` at `parsed_at` and goes
+  through `apply_diff`, as `toggle_task` applies its batch. `None` inserts `\n` through
+  `EditorState::insert`, so a plain `↩` still merges with typing.
+- `indent_item` and `outdent_item`: the same shape, with D4's fallbacks.
+- **A stale parse.** When `parsed_at` is not the buffer's version, `apply_diff` returns false and
+  the key edits nothing on that press. It never falls back to the plain key, whose edit could be the
+  wrong one. `refresh` then parses as usual, so the next press works. No user path reaches it: every
+  edit refreshes before the next key.
 - The four handlers live in a new `crates/app/src/editor/lists.rs`; `actions.rs` declares the two
   actions and registers them, as it does `ToggleTask`.
 - `keymap.rs` gains `tab` → `IndentItem` and `shift-tab` → `OutdentItem` in the editor context.
   `ctrl-tab` and `ctrl-shift-tab` stay `AppShell`'s (`keymap.rs:98-99`).
 - Each list command is one undo step, since `apply_diff` transacts on its own.
 
+**The caret after `⌘Z`.** `Buffer::undo` returns the range its last inverse edit restored
+(`crates/text/src/buffer/history.rs:180-187`), and `EditorState::undo` puts the caret at its end
+(`state.rs:278-284`). `Buffer::apply_diff` replaces the hunks last first (`diff.rs:183-187`), and
+undo replays the recorded edits backwards, so it ends on the hunk furthest down the note. Per
+command:
+
+- `↩` with one hunk, `⌫`, and `↩` on an empty item: the caret returns to where it was before the
+  command.
+- `↩` with renumbering or moved lines, and `⇥` or `⇧⇥` on more than one line: the caret lands at the
+  end of the hunk furthest down the note, as after `⌘L` today (Open question 8).
+
 `inkra-markdown` gains `crates/markdown/src/list_edit.rs`, with one submodule per command
-(`newline.rs`, `indent.rs`, `backspace.rs`) and `renumber.rs`, their tests in their own files. It
-exports `continue_list`, `indent_items`, `outdent_items` and `remove_markup`. No marker grammar is
-written there: every marker, item and quote comes from the parse, as in `cycle.rs`. Reading the
-digits and the delimiter at a marker the parse found is `marker_end`'s job (`items.rs:285-290`).
+(`newline.rs`, `indent.rs`, `backspace.rs`), `renumber.rs` and `shift.rs` (D7), their tests in their
+own files. It exports `continue_list`, `indent_items`, `outdent_items` and `remove_markup`. No
+marker grammar is written there: every marker, item and quote comes from the parse or the fallback,
+as in `cycle.rs`. Reading the digits and the delimiter at a marker found that way is `marker_end`'s
+job (`items.rs:285-290`).
 
 ## Performance
 
-- Each list command reads the parse already cached for the buffer's version. It runs no
-  pulldown-cmark pass: no command verifies its edit by parsing a copy, unlike `⌘L`.
-- Finding the caret item costs two binary searches. A sibling or parent costs the depth.
-- `↩` writes O(line) bytes. `⇥` and `⇧⇥` cost the moved blocks' lines. Renumbering costs the
-  edited list's later siblings.
+- Each list command reads the parse already cached for the buffer's version. It runs no pass over
+  the note: no command verifies its edit by parsing a copy, unlike `⌘L`. The fallback (D8) is one
+  pass over the caret's line, only where no item opens.
+- Finding the caret item costs two binary searches. A sibling, parent or holder costs the depth.
+- `↩` writes O(line) bytes, plus the lines that move. `⇥` and `⇧⇥` cost the moved blocks' lines.
+  Renumbering and the width shift cost the edited list's later siblings and their lines.
 - The edit then reparses once through `refresh`, as any keystroke does.
-- `Item` grows `Structure::items` from 8 to 24 bytes per item, filled in the existing pass. Measure
+- `Item` grows `Structure::items` from 8 to 32 bytes per item, filled in the existing pass. No
+  projected vector is built (D1). Measure
   `cargo bench -p inkra-markdown --bench parse -- --quick 'markdown_parse/500000$'` before and
   after L1; it should stay within noise.
 
@@ -390,28 +517,42 @@ digits and the delimiter at a marker the parse found is `marker_end`'s job (`ite
 
 `inkra-markdown`, `#[test]` tables per rule, input and expected text with `|` for the caret:
 
+- D1: the holder of `c` in `- a\n  - b\n\n  c` is `a`; `1. a\n\npara\n\n2. x` has two lists;
+  `> - a\n\n- b` has two lists.
 - D2: every rule, each with a quoted variant; `- [x] a|`, `1) a|`, `09. a|`, `- - a|`, `-   a|`,
-  `- it|em`, `- a |b` (the blank trimmed), `- a\n  b|`, `|- a`, `- > - a|`, a fence held by an item,
-  a top-level fence, a lazy line.
+  `- it|em`, `- a |b` (the blank trimmed), `- a\n  b|`, `|- a`, `- > - a|`, `- a|\n  - c`,
+  `- a|\nb`, `- a\n- |b`, `para\n- |abc`, `- p\n  - |abc`, a task's fenced code, an indented code
+  block in an item, a fence on a marker line, a top-level fence, a lazy line.
 - D3: top level, nested once and twice, inside a quote, an ordered parent.
-- D4: one item, an item with children, a run, a run with a non-item line, a first item, a top-level
-  `⇧⇥`, a tab in the leading blanks, a held code line, each marker-kind case.
+- D4: one item, an item with children, a run, a run with a non-item line, a first item,
+  `> - a\n\n- b`, a top-level `⇧⇥`, a tab in the leading blanks, a held code line, a selection
+  inside an item's code, each marker-kind case, `- a\n  1. b\n  2. c` with `⇧⇥` on `b`.
 - D5: each rule; a task with no text; the first line of a note.
-- D6: an insertion, a removal, a move, a hand-numbered list, a kind change, `9.` to `10.`.
-- No list command parses: a thread-local pass counter, as `cycle.rs` keeps (`cycle.rs:242-251`).
+- D6: an insertion, a removal, a move, a hand-numbered list, a kind change.
+- D7: `9.` to `10.` with a held line and a child list, by renumbering, by `⇧⇥` and by `↩`; `10.` to
+  `-` under `⇧⇥`.
+- D8: `- p\n  - |`, `- p\n  * |`, `1. a\n   1. |` and `para\n- |` under `↩`, `⇧⇥`, `⌫` and `⇥`.
+- No list command parses the note: a thread-local pass counter, as `cycle.rs` keeps
+  (`cycle.rs:242-251`), allows one fallback pass per command at most.
 
-Proptests over generated lists (bullets, numbers, tasks, quotes, nesting up to four):
+Proptests over generated notes: lists of bullets, numbers up to three digits, tasks, quotes, tabs in
+the indent, held lines, lazy lines and code blocks in items, nesting up to four:
 
+- **P0, the intended structure.** After every list command, a parse of the result shows the
+  structure the command meant. Each command states it as a change to the old parse's items, each
+  item given by its depth and its list: `↩` by rule 6 adds one item, a sibling of the caret item in
+  its list, and gives it the old item's children; `⇥` makes the run children of the previous
+  sibling, in its last child's list when it has one; `⇧⇥` makes the run siblings of the parent and
+  the following siblings children of the run's last item; `⌫` removes one item and nothing else;
+  `↩` on an empty item removes it or moves it up one level. Every other item keeps its depth, its
+  list and its order, and every quote still opens. The test parses; the command does not.
 - **P1.** At a marker line's end with text, `continue_list` then `remove_markup` restores the text
   and the caret.
-- **P2.** On a bullet list, `indent_items` then `outdent_items` on the same item restores the text.
-  On a sequential ordered list it does too, once D6 is built.
-- **P3.** `outdent_items` writes no non-blank byte outside the digits it renumbers, and `⇧⇥` with
+- **P2.** `indent_items` then `outdent_items` on an item with no sibling below restores the text, on
+  bullet and on sequential ordered lists.
+- **P3.** `outdent_items` writes no non-blank byte outside the markers it rewrites, and `⇧⇥` with
   no item writes nothing.
-- **P4.** After any list command, every opener of the text outside the command's own hunks still
-  opens at its mapped byte, as `cycle.rs` checks it (`cycle.rs:213-222`). The test parses; the
-  command does not.
-- **P5.** After `continue_list` by rule 5, the new line holds a gutter item, and a task when the
+- **P4.** After `continue_list` by rule 6, the new line holds a gutter item, and a task when the
   caret item was one (`Markdown::task_at`).
 
 `app`, headless `#[gpui::test]` against `MemFs`, one `simulate_keystrokes` test per binding:
@@ -420,29 +561,49 @@ Proptests over generated lists (bullets, numbers, tasks, quotes, nesting up to f
 - `tab` nests `- b` under `- a`; `tab` on a paragraph inserts `\t`.
 - `shift-tab` outdents; `shift-tab` on a paragraph changes nothing.
 - `backspace` turns `- [ ] a` into `- a` in the editor, and deletes one byte in the name field.
-- `cmd-z` after each restores the text in one step.
+- `cmd-z` after each restores the text in one step, and puts the caret where D9 says.
+- A command on a stale parse, made by a write that skips `refresh`, edits nothing.
 - `keymap/tests.rs` passes: `tab` and `shift-tab` are bound in the editor context alone.
 
 After L1 and L2, render the `markdown-lists` scene with a continued and a nested item, and look at it.
 
 ## Slices
 
-Each slice is vertical and ends green on `./scripts/check.sh`, then runs the markdown mutants on the
-diff (CLAUDE.md, Commands).
+Each slice is vertical, shippable alone, and ends green on `./scripts/check.sh`, then runs the
+markdown mutants on the diff (CLAUDE.md, Commands).
 
-1. **L1, `↩` continues** (~1 d). D1's `Item`, D2 whole, the `newline` change, D2's tests, P1's
-   continue half with the plain fallback, P4, P5. No renumbering yet: a split of `1. a` gives two
-   `2.`s until L4. The parse bench before and after.
-2. **L2, `⇥` and `⇧⇥`** (~1.5 d). D4, the two actions and bindings, the hide list, D4's tests, P2
-   on bullet lists, P3. The scene.
-3. **L3, the empty item and `⌫`** (~1 d). D3 on top of L2's outdent, D5 and `backspace_markup`,
-   their tests, P1 whole.
-4. **L4, renumbering** (~0.5 d), after Open question 2. D6 in all three commands, its tests, P2 on
-   ordered lists.
+1. **L1, `↩` continues and leaves** (~1.5 d). D1's `Item` and its readers, D2 whole, D3's top-level
+   case, D8 for `↩`, the `newline` change, the stale-parse rule, their tests, P0 for `↩`, P1's
+   continue half with the plain fallback, P4. Until L2 a nested empty item leaves the list as at the
+   top level. Until L4 nothing renumbers, so a split of `1. a` gives two `2.`s, and a widened marker
+   takes no width shift. The parse bench before and after.
+2. **L2, `⇥` and `⇧⇥`** (~2 d). D4 with the adopted siblings renumbered from `1`, D3's nested case,
+   D7 for marker kinds and adopted siblings, D8 for `⇧⇥` and `⇥`, the two actions and bindings, the
+   hide list, their tests, P0 for both, P2 on bullet lists, P3. The scene.
+3. **L3, `⌫`** (~0.5 d). D5 and `backspace_markup`, D8 for `⌫`, their tests, P0 for `⌫`, P1
+   whole.
+4. **L4, renumbering** (~1 d). D6 in every command, D7 for renumbered widths and moved lines, their
+   tests, P2 on ordered lists.
 
 ## History
 
-- 2026-11-19: drafted from the list-typing audit, after the owner approved chantier A.
+- 2026-11-19: drafted from the list-typing audit, after the owner approved chantier A (`56b97c65`).
+- 2026-11-19: the owner decided Open questions 1–7 and 9. A red-team review, checked with
+  pulldown-cmark 0.13.6, found:
+  - B1, only `-` makes a setext heading; `*`, `+` and `1.` read as text. Rewrote the facts (D8),
+    gave each command its fallback rule, and made `↩` at a text start write a sibling above or a
+    blank line (D2, rule 7).
+  - B2, siblings had meant the same parent, so `1. a\n\npara\n\n2. x` renumbered across two lists
+    and `> - a\n\n- b` with `⇥` made indented code. `Item` now records its list (D1).
+  - M1, a held line's item was the last marker above it; it is now the holder (D1).
+  - M2, a wider marker broke its item's lines: the width shift (D7, decision 4).
+  - M3, `⇧⇥` in place left an adopted ordered run as text: it renumbers from `1` in L2 (D4).
+  - M4, the code rule used the hang column, wrong for a task's code: a code line copies its item
+    part (D2, rule 2).
+  - M5, L1 lacked the empty-item exit, so it was not shippable: D3's top-level case moved into it.
+  - Minor findings: the readers of `Structure::items` (D1), the `parsed_at` stamp and the stale
+    parse (D9), the caret after `⌘Z` (D9), a selection in an item's code (D4), lazy lines in a
+    split (D2, rule 6), and the central property P0.
 
 ## Deviations
 
@@ -457,7 +618,11 @@ diff (CLAUDE.md, Commands).
 - **From Zed, the empty nested item.** Zed outdents by one tab stop and keeps the marker, `1.` for a
   number (`input.rs:2739-2741`). Inkra outdents to the parent's level and takes the parent's marker
   kind, as CodeMirror does.
-- **From Zed, `⌫` and renumbering.** Zed has neither. Inkra follows CodeMirror's renumbering rule.
+- **From Zed, `↩` at a text start.** Zed continues there and leaves an empty item above
+  (`input.rs:2731`). Inkra writes a sibling above only where it parses, else a blank line (D2,
+  rule 7).
+- **From Zed, `⌫`, renumbering and the width shift.** Zed has none of them. Inkra follows
+  CodeMirror's renumbering rule, and adds the width shift.
 - **From CodeMirror, `⌫` after a marker.** CodeMirror replaces the marker with spaces. Inkra deletes
   it: the text keeps its bytes before the marker, opens no indented code, and D11 already paints a
   lazy line at its item's text.
@@ -471,59 +636,46 @@ diff (CLAUDE.md, Commands).
 | Item | Trigger |
 |---|---|
 | Reveal-rule changes for list markers (chantier B) | Chantier B is scheduled. |
-| An empty first child shown as an item, not a setext heading (Open question 1) | Chantier B, or the owner picks option b. |
+| An empty marker under a paragraph shown as an item, not a heading or text (D8) | Chantier B. |
+| `⌘Z` restores the selection from before a command (Open question 8) | The owner picks option b. |
 | `Delete` at a marker line's end joins the next item's text without its markup | The owner asks; it mirrors D5. |
 | `⌫` at a quote line's text start removes its `>` | The owner asks. |
-| `↩` keeps a code line's own indent | Code editing gets auto-indent. |
+| `↩` keeps a code line's own indent past its leaf text start | Code editing gets auto-indent. |
 | `⇥` and `⇧⇥` in the name field | A file name with a tab is reported. |
 | Moving an item up or down with its children | The owner asks. |
 
 ## Risks
 
-- **A setext heading on an empty first child.** `⇥` on an empty item under `- a` writes
-  `- a\n  - `, which `CommonMark` reads as `a` with a setext underline (Open question 1). Typing one
-  letter makes it an item.
-- **Renumbering across a digit count.** `9.` to `10.` widens the content column by one, so a held
-  line indented for `9. ` may turn lazy, and a child list indented by 3 may leave the item. Renumber
-  rewrites digits only; the tests pin the case.
+- **The transient heading.** Between `⇥` on an empty item and the first letter, the parent's text
+  shows as a level-2 heading (`-`) or gains the marker as text (`*`, `+`, `1.`). Decision 3 accepts
+  it.
 - **Tabs in a quote.** Columns count from the line's start, as `Blanks::scan` counts them
   (`gutters.rs:229-263`). A tab right after a `>` splits its columns between the quote and the
-  item, so D4 rewrites such a line's leading blanks as spaces before it cuts.
-- **Splitting moves children.** With D2's rule 5, `↩` at the end of `- a` with children gives the
-  children to the new empty item (Open question 3).
+  item, so D4 and D7 rewrite such a line's leading blanks as spaces before they cut.
+- **A long batch.** `⇧⇥` on an item high in a long list adopts every sibling below it, so one key
+  can rewrite many lines. Each is one hunk of one undo step.
 
 ## Open questions
 
-1. **An empty first child reads as a setext heading.** `- a\n  - ` is `a` as a level-2 heading in
-   `CommonMark`, until a letter is typed. It follows `⇥` on an empty item, and option B of question
-   3.
-   - a. Accept it until chantier B. Recommended: it lasts one keystroke, and the file stays
-     `CommonMark`.
-   - b. Inkra's parse reads a lone `-` line right under an item's paragraph as an empty item. The
-     screen then differs from GitHub's rendering of the same bytes.
-   - c. `⇥` on an empty item writes nothing until text arrives. That needs state in the view.
-2. **Renumber the siblings below?**
-   - a. Never, as Zed.
-   - b. CodeMirror's rule, while the old numbers ran in sequence (D6). Recommended: a hand-numbered
-     list stays as typed.
-   - c. Always the whole list.
-3. **`↩` at the end of an item that has children.**
-   - A. A new sibling at the caret; the children move under it. Recommended: no line moves, and the
-     new item is a second item, so no setext state.
-   - B. A new first child. Workflowy and Notion do this; it shows the setext state of question 1.
-   - C. A new sibling after the whole block. The caret jumps below the children.
-4. **`⌫` on an empty item.**
-   - a. It deletes the line and the `\n` before it. Recommended: `↩` then `⌫` restores the text,
-     and P1 holds.
-   - b. It deletes the markup and leaves an empty line, CodeMirror's first step.
-5. **`⇧⇥` on an item with siblings below.**
-   - a. In place: the siblings below become its children. Recommended: no line moves, as in Zed and
-     CodeMirror.
-   - b. The item and its block move after the parent's block. Outliners do this; it moves text.
-6. **`⌫` at a bullet's or a number's text start.**
-   - a. Delete the marker and its blanks; the line turns lazy or held. Recommended (D5).
-   - b. Replace them with spaces, as CodeMirror does. The text keeps its column in the source, but
-     a wide number's spaces can open indented code after a blank line.
-7. **`⇥` on an item with no previous sibling.**
-   - a. Nothing. Recommended: the result could not nest.
-   - b. Indent anyway, as Zed does. The item would stay at its level and only move in the source.
+1. **An empty first child reads as a heading or text.** Decided by the owner on 2026-11-19: the
+   parse stays `CommonMark`, and the commands read the marker through the fallback (D8). The display
+   may change in chantier B.
+2. **Renumber the siblings below?** Decided on 2026-11-19: CodeMirror's rule, while the old numbers
+   ran in sequence (D6).
+3. **`↩` at the end of an item that has children.** Decided on 2026-11-19: a new sibling right after
+   the marker line's text, which takes the children, as in Obsidian (D2, rule 6).
+4. **`⌫` on an empty item.** Decided on 2026-11-19, as recommended: it deletes the line and the
+   `\n` before it (D5).
+5. **`⇧⇥` on an item with siblings below.** Decided on 2026-11-19, as recommended: in place; the
+   siblings below become its children, renumbered from `1` when ordered (D4).
+6. **`⌫` at a bullet's or a number's text start.** Decided on 2026-11-19, as recommended: delete the
+   marker and its blanks (D5).
+7. **`⇥` on an item with no previous sibling.** Decided on 2026-11-19, as recommended: nothing (D4).
+8. **The caret after `⌘Z` on a command of several hunks** (D9). It lands at the end of the hunk
+   furthest down the note, as after `⌘L` today: after `⇥` on an item with held lines, on its last
+   line; after a renumbering `↩`, on the last renumbered number.
+   - a. Accept it for chantier A. Recommended: it matches `⌘L`, and the fix belongs to the history.
+   - b. Store the selection with each transaction and restore it on `⌘Z`, as Zed does. It changes
+     `inkra-text`'s history for every edit, so it would be its own spec.
+9. **A marker that changes width.** Decided by the owner on 2026-11-19: the same batch shifts the
+   item's other lines by the width difference (D7).
