@@ -161,10 +161,10 @@ pub enum ItemMarker {
     `quote_gutters` (`gutters.rs:135-156`) and adds the item part with `item_part`
     (`items.rs:215-237`). A line's items are the records whose marker stands on it, by
     `line_start`.
-  - Between two marker lines, `Walk::held_lines` (`items.rs:282-324`) visits each line that the
+  - Between two marker lines, `Walk::held_lines` (`items.rs:282-329`) visits each line that the
     held items hold, and stops at the first line that none holds. `Held` (`items.rs:241-247`)
     keeps each held item's marker line and its hang column.
-  - `Walk::in_block` (`items.rs:327-330`) tells a blank line inside a code block from any other.
+  - `Walk::in_block` (`items.rs:332-335`) tells a blank line inside a code block from any other.
     It reads the parse's code block ranges, in order, so the walk passes each block once.
 - **The quote part counts columns.** `gutter` counts the blanks before each `>` in columns, as
   `LineStart` does (`Blanks`, `gutters.rs:200-232`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
@@ -291,7 +291,7 @@ Behaviour:
 - Home goes to the line's start (`to_row_edge`, `crates/app/src/text_input/actions.rs:84-103`). So
   it reveals the item part, as it revealed a bullet.
 - A gutter item's bullet has no `•` conceal, because its slot paints it. Any other item's bullet
-  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:361-370`).
+  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:366-375`).
 - The quote part and the item part reveal apart (markdown-blocks S1 review). In `> - a`, a caret on
   `>` reveals the quote part only.
 - The marker equals the element, because no other conceal starts in an item part. An item part
@@ -778,14 +778,14 @@ code block, a table, and a quote inside the item.
 - Its item part is its blanks from the quote part's end, as long as each blank's column is below the
   innermost gutter item's hang column.
 - The hang column is the column after the marker line's item part, by `column_after`
-  (`crates/markdown/src/items.rs:352-357`). So in `-\ta\n    b`, both lines hide four columns, and
+  (`crates/markdown/src/items.rs:357-362`). So in `-\ta\n    b`, both lines hide four columns, and
   `b` starts where `a` does.
 - So its text starts where the item's text starts, as a wrapped row does.
 - Columns count from the line's start, and a tab stops at the next multiple of 4 (D1, columns).
 - The walk computes an item's hang column the first time it meets such a line, and keeps it in
   `Held::hang`.
 - `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
-  (`items.rs:344-349`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
+  (`items.rs:349-354`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
   a bullet, the digits and the `.` or `)` for a number.
 
 **A lazy line** hides the blanks it has and starts at the same place, because it continues the
@@ -805,7 +805,7 @@ own item part (D3, D).
 
 - An item's range from its `Start(Item)` event holds its lazy lines, and the blank lines after it.
 - The walk enters an item at its marker's line. The range can start on the line before
-  (`marker_start`, `crates/markdown/src/items.rs:335-340`).
+  (`marker_start`, `crates/markdown/src/items.rs:340-345`).
 
 | Text | Line | Item part | Slots |
 |---|---|---|---|
@@ -1216,15 +1216,16 @@ Newest last. Each entry says what changed and why.
     faster on the median of 8 rounds, and 1.8 to 2.8% fewer instructions per iteration.
     `markdown_parse/500000` is 5.7% slower, past its 3% gate; T6c1 alone is 1.5 to 1.9% slower.
   - A profile put most of the difference in the walk: its line scans and its per-line setup.
-  - Two changes closed the gate. The walk finds a marker line's next line by a byte search, and
-    `held_lines` returns at once when no item is held or no line lies between two marker lines.
+  - Two changes closed the gate. The walk finds a marker line's next line by a byte search.
+    `held_lines` releases and checks the held items before it searches a line's end, so a call
+    that holds nothing scans no line.
     The keys moved to one shared vector, Open question 10's fallback: `Markdown::width_keys`, which
     each `ItemPart::numbers` indexes by range. `Gutter::same` compares the keys each parse holds
     there, so a list typed above another leaves the other's lines clean.
-  - Measured after them in 6 alternating rounds against `task-boxes-t6b`: `markdown_parse/500000`
-    +2.5% on the median, +2.0 to +3.5% per round. In 3 rounds of three: T6b 2.924 ms, T6c1
-    2.960 ms (+1.3%), T6c2 2.973 ms (+1.7%). The layout cases stay 4.7 to 11% faster over 3
-    rounds, with 1.6 to 2.9% fewer instructions per iteration.
+  - Measured after them in 12 alternating rounds against `task-boxes-t6b`:
+    `markdown_parse/500000` +2.8% on the median, +1.7 to +4.2% per round. In 3 rounds of three:
+    T6b 2.924 ms, T6c1 2.960 ms (+1.3%), T6c2 2.973 ms (+1.7%). The layout cases stay 4.7 to 11%
+    faster over 3 rounds, with 1.6 to 2.9% fewer instructions per iteration.
 
 **Reversed decisions.**
 
