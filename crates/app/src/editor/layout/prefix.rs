@@ -18,7 +18,7 @@ use margin::{Hanging, Opening};
 
 pub(super) use gutter::GutterCarry;
 pub(super) use margin::heading_opening;
-pub(super) use marks::{Mark, Paint};
+pub(super) use marks::{Align, Mark, Paint};
 
 pub(super) enum Prefix {
     /// A heading's opening marker, left of the column.

@@ -4,7 +4,7 @@ Status: **approved** 2026-11-16, from a brainstorm with the owner. The owner app
 on 2026-11-18, then reshaped them the same day through the answers to the T6 review and to Open
 questions 5 and 6. In the real font, T6b as built glued a task's text to its box. The owner then
 moved bullets into the box's slot (decision 7). T6c is designed, and the owner decided its Open
-questions 7 and 8 on 2026-11-18/19. Open question 9 waits on the rendered scene. Open question 10
+questions 7 and 8 on 2026-11-18/19, and Open question 9 on the rendered scene. Open question 10
 was decided before T6c1 started, and T6c2 took its fallback. T6c1 and T6c2 are built, and the
 cross-slice review's fixes are in (History). The owner made hidden blanks an atom on 2026-11-19
 and decided its Open question 11 the same day (D2). This spec replaces S3 of
@@ -482,7 +482,9 @@ from the line's `Gutter` and its own conceals. `GutterCarry::layout`
   0, and wrapped rows start at the same edge.
 - A heading in an item keeps body-size slots, as a quoted heading keeps a body-size gutter
   (markdown-blocks D3). So the slots of one list line up.
-- On a heading line, a `•` or a number paints with its baseline on the heading's first-row baseline.
+- On a heading line, a number paints with its baseline on the heading's first-row baseline, as text
+  does. A `•` is a symbol: the middle of its x-height sits on the middle of the heading's x-height.
+  A body-size dot on a heading's baseline reads low (owner, 2026-11-19).
   The box stays centred on row 0, as on any line (D4).
 
 **One number width per list** (Open question 8, decided).
@@ -598,14 +600,17 @@ limit of an unlisted file (`scripts/line-ceilings.sh:7`).
   that mark for the hit test and returns its square, or `None`.
 - **Paint.**
   - The visible-line loop calls `paint_marks` on each line (`crates/app/src/editor/layout/paint.rs:206`).
-    `paint_marks` (`paint.rs:227-273`) replaced T5's `paint_task`.
+    `paint_marks` (`paint.rs:228-282`) replaced T5's `paint_task`.
   - It paints each concealed mark at its `x`. A `•` or a number paints through `ShapedLine::paint`.
   - A text mark paints at the `y` that puts its baseline on the line's row-0 baseline. gpui
     sets a baseline at half the leading plus the ascent
     (`vendor/zed-reference/crates/gpui/src/text_system/line.rs:557-558`). So the offset is the
     line's baseline minus the mark's: 0 on a body line, more on a heading.
+  - A `•` rises by half the line's x-height minus its own, so the middles of the two x-heights
+    meet. On a body line the rise is 0. Its `Align` says which rule a mark takes (`marks.rs`).
   - The line's ascent and descent come from its fonts' metrics at its size, never from its shape:
-    `LineLayout::text_metrics` (`line.rs:113-131`) takes the largest over the line's runs, as
+    `LineLayout::text_metrics` (`line.rs:111-129`) takes the largest over the line's runs, the
+    x-height too, as
     `gpui_apple` lays a line out (`vendor/zed-reference/crates/gpui_apple/src/text_system.rs:567-570`).
     An empty line keeps one run but shapes no glyph, and its shape reports an ascent and a descent
     of 0. So the mark of `- ` or `1. ` painted about 6 px high before the cross-slice review.
@@ -829,7 +834,7 @@ stays at 41.
 
 They come from mockup C: a 15 px box with a 4 px radius, a 1.5 px border and a 10 px gap, at 15 px
 text. At the 18 px body the box takes 16 px and the check 12 px. The gap keeps mockup C's 10 px,
-because the box grew by only one pixel (Open question 9). A slot is then 26 px.
+because the box grew by only one pixel (Open question 9, decided). A slot is then 26 px.
 
 Measured at 18 px in the body font, `NSFont.systemFont(ofSize: 18)` (History):
 
@@ -1155,7 +1160,8 @@ constants, never with a glyph's computed width.
   - At a 12 px body, where `1.` plus the gap fits a slot, `1. a\n- b`: `a` starts where `b` does.
   - `- - [ ] a` paints a `•` in slot 0 and the box in slot 1. `> - [ ] a` paints its box at the
     quote part's width.
-  - `- # a`: the `•`'s baseline is the heading's first-row baseline.
+  - `- # a`: the middle of the `•`'s x-height is the middle of the heading's first-row x-height.
+    `1. # a`: the number's baseline is the heading's first-row baseline.
   - `- a`, `- `, `1. ` and `-`: the mark's baseline is the one the body font's metrics give row 0,
     so an empty item's mark sits as a typed one's (D4, cross-slice review, M3). `FontMetrics::descent`
     is negative, below the baseline, while a laid-out line's descent is positive, so the test negates
@@ -1613,6 +1619,11 @@ Newest last. Each entry says what changed and why.
 - **A mark's baseline from the line's shape** (T6c1) became the baseline from the line's font
   metrics (the cross-slice review). An empty line's shape reports no ascent.
 
+- **A `•` on a heading's baseline** (T6c1, m5) became a `•` centred on the heading's x-height
+  (T6d, the owner on the rendered scene). A number keeps the baseline. `Paint::Text` carries an
+  `Align`, so the mark's kind, not its text, picks the rule. `LineLayout::text_metrics` adds the
+  x-height, the largest of the line's fonts, as for the ascent.
+
 **Superseded deviations.**
 
 - **T1a, `Geometry` staged across slices.** Done: the quote part's width came in T1a and the
@@ -1730,8 +1741,8 @@ Newest last. Each entry says what changed and why.
    - So the text of a list running 8 to 11 is one column, and its children and other lines start at
      that text.
    - Going from 9 to 10 items dirties the whole list once (D9).
-9. **A 10 px gap, and a `•` centred on the box's axis** (T6c). Open: settle it on the rendered
-   `markdown-lists` scene. It is a constant, so it does not block T6c.
+9. **A 10 px gap, and a `•` centred on the box's axis** (T6c). Decided by the owner on
+   2026-11-19, on the rendered `markdown-lists` scene: both stay.
    - With a 10 px gap, mockup C keeps its gap and a slot is 26 px. `1.` to `9.` then fit it with
      under 1 px to spare (D8).
    - The alternatives are 8 px, which gives a 24 px slot, or 12 px, which is mockup C's gap scaled

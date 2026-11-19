@@ -3,9 +3,7 @@
 
 use std::rc::Rc;
 
-use gpui::{
-    Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, px, size,
-};
+use gpui::{Bounds, Pixels, ShapedLine, SharedString, TextRun, Window, WrappedLine, point, size};
 use inkra_markdown::DisplayLine;
 use inkra_text::ByteOffset;
 
@@ -110,23 +108,23 @@ impl LineLayout {
         matches!(mark.paint, Paint::Box { .. }).then(|| self.box_square(mark.x))
     }
 
-    /// The text's ascent and descent: the largest of its runs' fonts at its size, as `gpui_apple`
-    /// lays a line out (`text_system.rs:567-570`). An empty line keeps one run, and its shape, with
-    /// no glyph, reports neither (task boxes spec, D4).
-    pub(super) fn text_metrics(&self, window: &Window) -> (Pixels, Pixels) {
+    /// The text's ascent, descent and x-height: the largest of its runs' fonts at its size, as
+    /// `gpui_apple` lays a line out (`text_system.rs:567-570`). An empty line keeps one run, and
+    /// its shape, with no glyph, reports none (task boxes spec, D4).
+    pub(super) fn text_metrics(&self, window: &Window) -> TextMetrics {
         let text_system = window.text_system();
         let size = self.shape.font_size;
         self.shape
             .runs
             .iter()
-            .fold((px(0.), px(0.)), |(ascent, descent), run| {
+            .fold(TextMetrics::default(), |metrics, run| {
                 let font = text_system.resolve_font(&run.font);
-                // A font's descent lies below the baseline, so it is negative.
-                let below = -text_system.descent(font, size);
-                (
-                    ascent.max(text_system.ascent(font, size)),
-                    descent.max(below),
-                )
+                TextMetrics {
+                    ascent: metrics.ascent.max(text_system.ascent(font, size)),
+                    // A font's descent lies below the baseline, so it is negative.
+                    descent: metrics.descent.max(-text_system.descent(font, size)),
+                    x_height: metrics.x_height.max(text_system.x_height(font, size)),
+                }
             })
     }
 
@@ -135,6 +133,14 @@ impl LineLayout {
         let top = (self.row_height - TASK_BOX_SIZE) / 2.;
         Bounds::new(point(x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE))
     }
+}
+
+/// A line's vertical font metrics, each positive.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TextMetrics {
+    pub(super) ascent: Pixels,
+    pub(super) descent: Pixels,
+    pub(super) x_height: Pixels,
 }
 
 /// Where a line lands in one layout: what an edit above it moves.
