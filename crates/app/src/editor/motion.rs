@@ -26,13 +26,9 @@ impl EditorView {
         let snap = self.snap();
         self.move_cursor(window, cx, |state, buffer| {
             let start = buffer.clip_grapheme(range.start, Bias::Left);
+            let end = buffer.clip_grapheme(range.end, Bias::Right);
             state.move_to(buffer, start, false, &snap);
-            state.move_to(
-                buffer,
-                buffer.clip_grapheme(range.end, Bias::Right),
-                true,
-                &snap,
-            );
+            state.move_to(buffer, end, true, &snap);
         });
         // Over the gate's minimal reveal: the last reveal decides the offset, before any paint.
         self.reveal_cursor(Reveal::Center, cx);

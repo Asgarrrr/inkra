@@ -8,7 +8,6 @@ use gpui::{
     ClipboardItem, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext,
     WindowHandle, point, px,
 };
-
 use inkra_text::Bias;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
@@ -26,7 +25,7 @@ const QUOTED: &str = "> - a\n>   b\n\nbody";
 /// A code line in a task: inside 15..17, edge 14, text start 17.
 const CODE: &str = "- [ ] a\n\n  ```\n  x\n  ```\n\nbody";
 
-/// The editor on `text`, drawn, its caret at `caret`.
+/// The editor on `text`, drawn, its caret at `caret` or past the atom holding it.
 fn editor(cx: &mut TestAppContext, text: &str, caret: usize) -> (Handle, VisualTestContext) {
     let (window, mut cx) = dispatching(cx, text);
     cx.run_until_parked();
