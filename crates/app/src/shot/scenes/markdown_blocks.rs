@@ -31,7 +31,7 @@ const QUOTES: &str = "A paragraph before the quotes.\n\
                       1. - [x] A done task after a number\n\
                       \n\
                       > - [ ] A quoted task\n\
-                      with a lazy line at the quote's edge.\n\
+                      with a lazy line under its text.\n\
                       \n\
                       - [x] A done task long enough to wrap: its second row starts at the gutter's edge, under its text and not under the hidden marker.\n\
                       \n\
@@ -53,11 +53,12 @@ fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-/// Every marker line of a list (task boxes spec, D3, D11). Other lines still show their blanks in
-/// the text until T6c2.
+/// A list's marker lines and its other lines: continuation, lazy and code lines start at their
+/// item's text (task boxes spec, D3, D11).
 const LISTS: &str = "- A top bullet\n\
                      \x20\x20- Nested by two spaces\n\
                      \x20\x20\x20\x20- Three levels deep\n\
+                     \x20\x20\x20\x20\x20\x20with its second line\n\
                      - A bullet with a child by four spaces\n\
                      \x20\x20\x20\x20- Four spaces in\n\
                      - A bullet with a child by a tab\n\
@@ -72,6 +73,7 @@ const LISTS: &str = "- A top bullet\n\
                      \n\
                      8. Eight\n\
                      9. Nine\n\
+                     \x20\x20\x20and its second line\n\
                      10. Ten\n\
                      \x20\x20\x20\x20- A child under ten\n\
                      11. Eleven\n\
@@ -79,6 +81,9 @@ const LISTS: &str = "- A top bullet\n\
                      1) One\n\
                      2) Two\n\
                      3) Three\n\
+                     \n\
+                     > - A quoted bullet\n\
+                     >   with its second line\n\
                      \n\
                      1. [ ] An ordered task\n\
                      \x20\x20\x20- Its child\n\
@@ -111,7 +116,7 @@ fn lists_end(stage: &mut Stage) -> WindowHandle<AppShell> {
 pub(super) const SCENES: [Scene; 4] = [
     Scene {
         name: "markdown-blocks",
-        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line at the quote's edge, and wrapped, beside a plain bullet: each task's box in a slot where the bullet's `•` is, on its first row, a slot's gap before its text, and its text in the bullet's text column; under the open task a nested task and a nested bullet, their box and `•` under the open task's text; an ordered task's number in its slot then its box, a task after a bullet its `•` then its box; open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw `2. [ ] ` ending at its text, which stays in the ordered task's text column",
+        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line under its text, and wrapped, beside a plain bullet: each task's box in a slot where the bullet's `•` is, on its first row, a slot's gap before its text, and its text in the bullet's text column; under the open task a nested task and a nested bullet, their box and `•` under the open task's text; an ordered task's number in its slot then its box, a task after a bullet its `•` then its box; open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw `2. [ ] ` ending at its text, which stays in the ordered task's text column",
         open: concealed,
     },
     Scene {
@@ -121,12 +126,12 @@ pub(super) const SCENES: [Scene; 4] = [
     },
     Scene {
         name: "markdown-lists",
-        shows: "list marker lines in slots: each `•` centred on the box's axis, each text one slot right; children by two spaces, four spaces and a tab start their slot at the parent's text, three levels deep; a wrapped bullet's second row at its text; tasks' boxes in the bullets' column, their text in the bullets' text column; interim: a continuation line and a lazy line keep their blanks in the text; the caret on the second line's start shows its raw `  - ` ending at its text, which does not move",
+        shows: "list marker lines in slots: each `•` centred on the box's axis, each text one slot right; children by two spaces, four spaces and a tab start their slot at the parent's text, three levels deep; a wrapped bullet's second row at its text; tasks' boxes in the bullets' column, their text in the bullets' text column; a third-level bullet's second line, a continuation line and a lazy line at their item's text; the caret on the second line's start shows its raw `  - ` ending at its text, which does not move",
         open: caret_on_a_nested_bullet,
     },
     Scene {
         name: "markdown-lists-end",
-        shows: "the same note's end: 8. to 11. right-aligned on one dot column, their texts on one column, the child under 10. at its text; 1) to 3) on their own column; an ordered task's number then its box, its child under its text; a `•` on a heading's baseline; the caret on the closing fence shows both fences; interim: the code block's lines keep their blanks and its background starts at the column's left",
+        shows: "the same note's end: 8. to 11. right-aligned on one dot column, their texts and 9.'s second line on one column, the child under 10. at its text; 1) to 3) on their own column; a quoted bullet's second line at its text; an ordered task's number then its box, its child under its text; a `•` on a heading's baseline; the caret on the closing fence shows both fences; the code block's lines, its blank line included, start at the item's text, and so does its background",
         open: lists_end,
     },
 ];
