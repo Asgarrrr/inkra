@@ -1,5 +1,6 @@
 use gpui::WindowHandle;
 
+use super::Scene;
 use crate::shell::AppShell;
 use crate::shot::stage::Stage;
 
@@ -37,7 +38,7 @@ const QUOTES: &str = "A paragraph before the quotes.\n\
                       2. [ ] A revealed ordered task";
 
 /// `home` puts the caret on the last task's number.
-pub(super) fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(QUOTES);
     stage.focus(window);
     stage.keys(window, "cmd-down home");
@@ -45,9 +46,22 @@ pub(super) fn concealed(stage: &mut Stage) -> WindowHandle<AppShell> {
 }
 
 /// `home` goes to the line's start, on its `>`.
-pub(super) fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
+fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(QUOTES);
     stage.focus(window);
     stage.keys(window, "cmd-up down home");
     window
 }
+
+pub(super) const SCENES: [Scene; 2] = [
+    Scene {
+        name: "markdown-blocks",
+        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line at the quote's edge, and wrapped, beside a plain bullet: each task's box where the bullet's `•` is, on its first row, and its text in the bullet's text column; under the open task a nested task and a nested bullet, their box and `•` under the open task's text; the box right after its lead: an ordered task's number, the `•` of a task after a bullet; open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw in a widened gutter, its text right of the box column",
+        open: concealed,
+    },
+    Scene {
+        name: "markdown-blocks-revealed",
+        shows: "the caret on a quote's first line: its > paints in the gutter, no text moved",
+        open: revealed,
+    },
+];

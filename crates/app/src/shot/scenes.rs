@@ -437,16 +437,6 @@ const CATALOGUE: &[Scene] = &[
         open: command_palette::theme_picker,
     },
     Scene {
-        name: "markdown-blocks",
-        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line at the quote's edge, and wrapped, beside a plain bullet: each task's box where the bullet's `•` is, on its first row, and its text in the bullet's text column; under the open task a nested task and a nested bullet, their box and `•` under the open task's text; the box right after its lead: an ordered task's number, the `•` of a task after a bullet; open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw in a widened gutter, its text right of the box column",
-        open: markdown_blocks::concealed,
-    },
-    Scene {
-        name: "markdown-blocks-revealed",
-        shows: "the caret on a quote's first line: its > paints in the gutter, no text moved",
-        open: markdown_blocks::revealed,
-    },
-    Scene {
         name: "code-blocks",
         shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a long line on one row scrolled 240 px and clipped at the background, in a quote past its bars with a long line scrolled 120 px, in a list at the fence column, no language, indented; the language label right-aligned in the opening row; the pointer over the rust block shows its 3 px scroll bar, and the quoted block's bar lingers from its swipe on the test clock",
         open: code_blocks::concealed,
@@ -469,7 +459,10 @@ const CATALOGUE: &[Scene] = &[
 ];
 
 pub(crate) fn catalogue() -> impl Iterator<Item = &'static Scene> {
-    CATALOGUE.iter().chain(&code_highlighting::SCENES)
+    CATALOGUE
+        .iter()
+        .chain(&markdown_blocks::SCENES)
+        .chain(&code_highlighting::SCENES)
 }
 
 fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {
