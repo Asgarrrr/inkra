@@ -79,7 +79,7 @@ T6c retires these terms: task part, box run, lead, box slot.
 
 ## D1. The data
 
-`Gutter` (`crates/markdown/src/gutters.rs:12-23`) trades `task` for `item: Option<ItemPart>`.
+`Gutter` (`crates/markdown/src/gutters.rs:12-21`) trades `task` for `item: Option<ItemPart>`.
 
 ```rust
 pub struct ItemPart {
@@ -121,11 +121,14 @@ pub enum ItemMarker {
   holds it and the line is not blank, or when it is a blank line inside a code block that a gutter
   item holds (D11).
 - **The range.** `range` runs through the quote part, then the item part. `Gutter::quote_end`
-  (`gutters.rs:36-42`) returns `item.start`, or `range.end` when the line has no item part.
-- **The marks.** `ItemPart::marks(&self, text) -> impl Iterator<Item = ItemMarker>` yields a marker
-  line's marks in order. They are the item part's non-blank runs outside the checkbox: a run that
-  starts with a digit is a number, any other a bullet. On a line that is not a marker line, the
-  item part holds only blanks, so it yields none. So `app` holds no bullet grammar.
+  (`gutters.rs:64-66`) returns `item.start`, or `range.end` when the line has no item part.
+- **The marks.** `ItemPart::marks(&self, part: &str) -> impl Iterator<Item = ItemMarker>`
+  (`gutters.rs:73-101`) yields a marker line's marks in slot order, before the box. `part` is the
+  item part's text, from `start` to the gutter's end. The marks are the item part's non-blank runs
+  before the checkbox: a run that starts with a digit is a number, any other a bullet. A task's own
+  bullet, the last run before its checkbox, is dropped, because the box takes its slot (D10). An
+  ordered task's number stays. On a line that is not a marker line, the item part holds only
+  blanks, so it yields none. So `app` holds no bullet grammar.
 - **Slot order.** A line's slots are its `indent` blank slots, then one slot per mark in order, then
   the box. The number slots take the keys of `numbers` in that order: the blank ones first, then
   one per `ItemMarker::Number`.
@@ -136,7 +139,8 @@ pub enum ItemMarker {
   item's first event that is not one `Start(Paragraph)`. The parser facts table of markdown-blocks
   holds for pulldown-cmark 0.13.6 (`Cargo.lock:4068-4069`).
 - **The records.**
-  - `Items` moves from `gutters.rs:71-150` to `crates/markdown/src/items.rs`.
+  - `Items` lives in `crates/markdown/src/items.rs` (`items.rs:38-50`); T6c1 moved it out of
+    `gutters.rs`.
   - At each gutter item's `Start(Item)` it records the item's range and its index in
     `structure.items`, which already holds the marker (D1, the structure). So no record repeats the
     marker. When the marker resolves, it records the box.
@@ -145,21 +149,27 @@ pub enum ItemMarker {
     delimiter. So the parse learns a list's width key at `End(List)`, in its one pass.
 - **The walk.**
   - After the parse's one pass, one walk over the lines builds every gutter. It builds the quote
-    part with `gutter` (`gutters.rs:255-278`), then the item part (D11).
+    part with `gutter` (`gutters.rs:174-192`), then the item part (D11).
   - It copies each holding list's width key into `numbers`. The pass has ended, so every key is
     final, and no line is back-filled.
   - The walk visits only lines inside a leading quote or a gutter item. It jumps from one container
     to the next.
-  - It replaces the quote walk (`gutters`, `gutters.rs:219-244`) and the task merge
-    (`Items::gutters`, `gutters.rs:126-149`).
+  - The walk is `Items::gutters` (`items.rs:144-197`). It takes the quote lines from
+    `quote_gutters` (`gutters.rs:135-156`) and adds the item part with `item_part`
+    (`items.rs:200-214`). A line's items are the records whose marker stands on it, by
+    `line_start`.
 - **The quote part counts columns.** `gutter` counts the blanks before each `>` in columns, as
-  `LineStart` does (`pulldown-cmark-0.13.6/src/scanners.rs:160-187`; `firstpass.rs:108-114`).
+  `LineStart` does (`Blanks`, `gutters.rs:200-232`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
+  `pulldown-cmark-0.13.6/src/firstpass.rs:109-114`).
   - A tab stops at the next multiple of 4 from the line's start.
   - The one blank after a `>` takes one column. When it is a tab, the tab's other columns count
     before the next `>`.
-  - A `>` opens when the blanks before it span at most three columns.
-  - Today `gutter` counts only spaces (`gutters.rs:261-268`). So on `> \t> - [ ] a` it finds one `>`
-    of the two that pulldown-cmark nests, and `> \t> a` shows one bar for two levels.
+  - A `>` opens when the blanks before it span at most three columns. Each `>` takes up to three
+    columns before it, entering a tab whole (`pulldown-cmark-0.13.6/src/parse.rs:1515-1518`).
+    pulldown-cmark opens a quote only where that same scan finds it, so `gutter` makes one scan per
+    `>`, continued or opening.
+  - Before T6c1, `gutter` counted only spaces. So on `> \t> - [ ] a` it found one `>` of the two
+    that pulldown-cmark nests, and `> \t> a` showed one bar for two levels.
 - **One line.** pulldown-cmark reads a checkbox only on its item's marker line. It scans the task
   marker right after the list marker, and only when the rest of that line is not blank
   (`pulldown-cmark-0.13.6/src/firstpass.rs:139-161`). A `debug_assert!` states this, and
@@ -168,16 +178,16 @@ pub enum ItemMarker {
   task with no text, as `- [ ]\n` is. No output reaches the added byte: no span or marker holds a
   `\n`, and every range ends before its line ending. A proptest pins it over every offset
   `Markdown` holds (`parse/tests/last_line.rs`).
-- **One lookup.** `Markdown::task_at(line_start) -> Option<&Task>` returns `gutter.item?.task` for
-  the gutter that starts at the line's start. It finds that gutter by binary search over `gutters`.
+- **One lookup.** `Markdown::task_at(line_start) -> Option<&Task>` (`gutters.rs:107-118`) returns
+  `gutter.item?.task` for the gutter that starts at the line's start. It finds that gutter by binary search over `gutters`.
   `cycle.rs`, `DocumentLayout::task_at` and the tests call it.
-- **(A) Change detection.** `Gutter::same` (`crates/markdown/src/changed.rs:139-162`) compares the
+- **(A) Change detection.** `Gutter::same` (`crates/markdown/src/changed.rs:144-168`) compares the
   item part: its mapped start, its `indent`, its `numbers`, and its task's mapped checkbox and
   `checked`. Without it, a toggle, a nesting change or a list that gains a digit would leave a
   carried line stale. `changed` walks no new vector (D9).
 
 **The structure `⌘L` reads.** `Markdown` has `structure: Structure`, filled in the parse's one
-pulldown-cmark pass (`parse.rs:86-144`):
+pulldown-cmark pass (`parse.rs:88-145`):
 
 ```rust
 pub struct Structure {
@@ -213,8 +223,8 @@ parse of 5.58 ms on 8b9db360. Measured on T6a, alternating with 003bbe95, the co
 **The gutters' cost per keystroke (T6c).**
 
 - It adds no pass: pulldown-cmark still runs once.
-- The walk replaces the quote walk. That walk already visits every line from the first quote to the
-  last (`gutters.rs:230-242`); the new walk visits container lines only. So line visits do not grow.
+- The walk adds no line visit. The quote walk already visits every line from the first quote to the
+  last (`quote_gutters`, `gutters.rs:135-156`); the item walk visits marker lines only.
 - On the 500 KB note of the parse bench (`crates/markdown/benches/parse.rs:11-27`), each section
   holds two quote lines and four list lines: a bullet, a task, a nested bullet and a number.
 - The gutter-item records reuse `structure.items` for their markers, so no record repeats one.
@@ -249,13 +259,13 @@ tab at 173-181).
 
 ## D2. The conceal
 
-**(B)** An item part has one conceal, the item conceal (`gutter_conceals`, `gutters.rs:280-303`).
+**(B)** An item part has one conceal, the item conceal (`gutter_conceals`, `gutters.rs:239-266`).
 
 - Its element and its marker run from the item part's start through the end of its last mark: a
   bullet, a number's `.` or `)`, or a checkbox's `]`.
 - On a line with no mark, they cover the whole item part.
 - An empty item part, as on line 2 of `- a\nb`, emits no conceal. A marker is never empty
-  (`crates/markdown/src/parse.rs:17`).
+  (`crates/markdown/src/parse.rs:19`).
 - The replacement is `""`.
 - Why: with the checkbox alone as the element, `⌃A` on `- [ ] a` put the caret at 0 and revealed
   nothing. Typing then landed before a hidden bullet.
@@ -272,23 +282,24 @@ Behaviour:
 - Home goes to the line's start (`to_row_edge`, `crates/app/src/text_input/actions.rs:84-103`). So
   it reveals the item part, as it revealed a bullet.
 - A gutter item's bullet has no `•` conceal, because its slot paints it. Any other item's bullet
-  keeps its conceal (`bullet`, `gutters.rs:206-217`).
+  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:245-254`).
 - The quote part and the item part reveal apart (markdown-blocks S1 review). In `> - a`, a caret on
   `>` reveals the quote part only.
 - The marker equals the element, because no other conceal starts in an item part. An item part
   holds blanks, markers and a checkbox. A gap conceal skips a line's leading `[ \t>]*`, and a fence
   or heading conceal starts at or past the text start.
 
-The `debug_assert!` in `line_prefix` (`crates/app/src/editor/layout/prefix.rs:131-149`) counts a
+The `debug_assert!` in `line_prefix` (`crates/app/src/editor/layout/prefix.rs:131-141`) counts a
 gutter's own conceals: its quotes, then at most one for its item part. The G-property in
 `parse/tests/gutters.rs` checks the same count.
 
 ## D3. The gutter and its width
 
 The gutter is a hanging indent: the line's text, wrapped rows included, starts at its right edge
-(markdown-blocks D3). `line_prefix` (`crates/app/src/editor/layout/prefix.rs:111-180`) builds it
+(markdown-blocks D3). `line_prefix` (`crates/app/src/editor/layout/prefix.rs:113-152`) builds it
 from the line's `Gutter` and its own conceals. `GutterCarry::layout`
-(`crates/app/src/editor/layout/prefix/gutter.rs:163-213`) measures it.
+(`crates/app/src/editor/layout/prefix/gutter.rs:150-199`) measures it, and `Marks::layout`
+(`prefix/marks.rs:46-106`) lays out the item part's slots and marks.
 
 **Concealed.** The gutter is the quote part, then the slots of the item part.
 
@@ -300,8 +311,9 @@ from the line's `Gutter` and its own conceals. `GutterCarry::layout`
 - The box sits at its slot's left, centred on row 0.
 - A `•` centres on the box's axis: the middle of its advance sits half of `TASK_BOX_SIZE` right of
   its slot's left.
-- Marks shape with the body's runs at the body size (`show`, `crates/app/src/editor/layout/runs.rs:144-171`).
-  Each distinct mark text shapes once per `shape_document`.
+- Marks shape at the body size with one run of `MARKER`'s style (`show`, `Shape::Mark`,
+  `crates/app/src/editor/layout/runs.rs:158-187`). Each distinct mark text shapes once per
+  `shape_document`.
 - Every mark carries `MARKER`. `MARKER` colours a run `md_marker` whatever else it carries
   (`crates/app/src/theme/markdown.rs:43-45`), so the mark's text alone can key its shape.
 - The gutter's width is the quote part's width plus the slots' widths. The text starts there on row
@@ -332,8 +344,10 @@ from the line's `Gutter` and its own conceals. `GutterCarry::layout`
 - **The measure.** Once per distinct key per `shape_document`, the layout shapes the key's widest
   number: the widest digit, `digits` times, then the delimiter.
   - It shapes in the body font with `MARKER`'s run style, as the marks paint.
-  - The widest digit comes from one shape of `0123456789`, once per `shape_document`.
-  - `GutterCarry` keeps both in the map that lives for one `shape_document`, beside the quote parts.
+  - The widest digit comes from one shape of `0123456789`, once per `shape_document`: the digit
+    with the largest glyph advance (`widest_digit`, `prefix/marks.rs`).
+  - `Marks` (`prefix/marks.rs:36-41`) keeps the slot per key and the widest digit for one
+    `shape_document`, beside the marks' shapes. `GutterCarry` holds it beside the quote parts.
 
 The expected geometry, concealed:
 
@@ -358,18 +372,18 @@ a mark's colour (D7). So a toggle never rewraps a concealed line.
   part. So a reveal moves the text only where the raw text is wider than its slots. A top-level
   task's `- [ ] ` is wider; a bullet's `- ` never is, because it is narrower than a slot.
 - The prefix range is `gutter.range` in both states. `line_prefix` still splits its conceals at
-  `gutter.range.end` (`prefix.rs:124-130`). So the text and its conceals do not depend on the state.
+  `gutter.range.end` (`prefix.rs:121-127`). So the text and its conceals do not depend on the state.
 - `Shown` holds the raw shape of the gutter's text, split at `quote_end` (`Shown::new`,
-  `prefix/gutter.rs:71-97`). Each revealed part paints as its own piece, never the whole text as
+  `prefix/gutter.rs:58-83`). Each revealed part paints as its own piece, never the whole text as
   one:
   - the quote part's piece at 0;
   - the item part's piece at the width minus its own advance.
   - So a selection that reveals both parts paints two pieces, and moves neither sideways.
 - The line wraps at the column minus its indent (`line_wrap`,
-  `crates/app/src/editor/layout/shape.rs:347-357`). So a widened gutter rewraps the line, as a
+  `crates/app/src/editor/layout/shape.rs:344-353`). So a widened gutter rewraps the line, as a
   revealed `**` does.
 - The caret and a click in the raw part map through `Shown` (`GutterLayout::offset_for_x`,
-  `prefix/gutter.rs:47-51`). A click on a concealed slot, or left of the raw piece, lands at the
+  `prefix/gutter.rs:27-30`). A click on a concealed slot, or left of the raw piece, lands at the
   text start.
 - The quote part keeps its behaviour:
   - Revealed, its raw text paints at 0.
@@ -377,28 +391,29 @@ a mark's colour (D7). So a toggle never rewraps a concealed line.
   - Its raw width equals its concealed width.
 
 **Where the raw width comes from.** `layout` already shapes the gutter's whole text raw while a part
-is revealed, to paint it (`prefix/gutter.rs:175-176`). So the raw width costs no extra shape. It
+is revealed, to paint it (`prefix/gutter.rs:158-164`). So the raw width costs no extra shape. It
 belongs to the line and is never cached.
 
 **The records.**
 
-- `Measured` (`prefix/gutter.rs:123-129`) shrinks to the quote part's `Geometry`, keyed by the quote
-  part's text. `measure` never reads `Reveal`.
-- `GutterLayout` (`prefix/gutter.rs:15-23`) replaces `task_box` with the line's concealed marks. Each
+- `Measured` is gone. `GutterCarry::quotes` (`prefix/gutter.rs:118-125`) maps each quote part's
+  text to its `Geometry`. `Geometry::measure` never reads `Reveal`.
+- `GutterLayout` (`prefix/gutter.rs:14-23`) replaces `task_box` with the line's concealed marks
+  (`Mark`, `prefix/marks.rs`). Each
   entry holds a mark's `x` and what it paints: a shaped `•`, a shaped number, or the box with its
   `checked`. The field is set only while the item part is concealed.
-- These items are removed: `TaskShape`, `TaskBox`, `GutterLayout::lead`, `Prefix::lead` and
-  `GutterCarry::slot`.
-- `Geometry` (`prefix/gutter.rs:112-121`) keeps the width, the bars' `x` and the quote part's width.
-- The 256-byte assertion on `LineLayout` (`crates/app/src/editor/layout/line.rs:95-96`) stays the
+- These items are removed: `TaskShape`, `TaskBox`, `Hidden`, `GutterLayout::lead`, `Prefix::lead`
+  and `GutterCarry::slot`.
+- `Geometry` (`prefix/gutter.rs:105-113`) keeps the width, the bars' `x` and the quote part's width.
+- The 256-byte assertion on `LineLayout` (`crates/app/src/editor/layout/line.rs:96-97`) stays the
   check. The marks and `Shown` stay boxed, so T6c adds no inline field.
-- The doc comment on `LineLayout::prefix` (`line.rs:89`) names the task part; T6c names the item
-  part. The comment on `display_line` (`shape.rs:407-408`), "no reveal can re-wrap its line", has
-  been stale since T6b; T6c updates it.
+- The doc comment on `LineLayout::prefix` (`line.rs:89-90`) names the item part. The comment on
+  `display_line` (`shape.rs:403-404`) says a reveal changes only the wrap width; its T6b form, "no
+  reveal can re-wrap its line", was stale.
 
 **(D) A lazy line carries the quote part only.**
 
-- `GutterCarry::pass` (`prefix/gutter.rs:153-161`) carries `Geometry::quote_part`. `layout` gives it
+- `GutterCarry::pass` (`prefix/gutter.rs:140-145`) carries `Geometry::quote_part`. `layout` gives it
   to a line that misses some of its `>`.
 - The item part is never carried: each line gets its own from the parse (D11).
 - Under `> - [ ] a\nb`, line `b` takes the quote part's width plus one blank slot. So it starts
@@ -411,26 +426,28 @@ No box vector. **(E)** A vector built in `shape_document` beside `bars` would be
 pass per keystroke, for data each line already holds. `layout/mod.rs` also stands at the 400-line
 limit of an unlisted file (`scripts/line-ceilings.sh:7`).
 
-- **The square.** `LineLayout::task_box` (`line.rs:102-111`) gives the square that a concealed box
+- **The square.** `LineLayout::box_square` (`line.rs:115-118`) gives the square that a concealed box
   paints and that a click hits. It is `TASK_BOX_SIZE` wide from its slot's left, centred on row 0.
+  `paint_marks` builds it from the box mark's `x`; `LineLayout::task_box` (`line.rs:106-112`) finds
+  that mark for the hit test.
 - **Paint.**
-  - The visible-line loop calls `paint_marks` on each line. `paint_marks` replaces `paint_task`
-    (`crates/app/src/editor/layout/paint.rs:181-202`).
+  - The visible-line loop calls `paint_marks` on each line (`crates/app/src/editor/layout/paint.rs:211`).
+    `paint_marks` (`paint.rs:232-274`) replaced T5's `paint_task`.
   - It paints each concealed mark at its `x`. A `•` or a number paints through `ShapedLine::paint`.
   - A text mark paints at the `y` that puts its baseline on the line shape's row-0 baseline. gpui
     sets a baseline at half the leading plus the ascent
     (`vendor/zed-reference/crates/gpui/src/text_system/line.rs:557-558`). So the offset is the line
     shape's baseline minus the mark's: 0 on a body line, more on a heading.
-  - The box paints through `paint_task_box` (204-257), which no longer takes a lead. Unchecked:
+  - The box paints through `paint_task_box` (277-321), which no longer takes a lead. Unchecked:
     `outline` in `md_marker`. Checked: `fill` in `accent`, then the check by `window.paint_svg` in
     `editor_background`.
   - The marks paint with the gutter, after the selection (`crates/app/src/text_input/paint.rs:103-106`).
     gpui: `vendor/zed-reference/crates/gpui/src/window.rs`, `paint_quad` 4934, `paint_svg` 5235,
     `fill` 8128, `outline` 8140.
-- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>` (`paint.rs:263-275`)
+- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>` (`paint.rs:327-339`)
   returns the task's flip and its text start (D5). It finds the line under `local.y` and requires
   `local` inside its square. **(F)** `row_for_y` clamps
-  (`crates/app/src/editor/layout/mod.rs:251-265`), so the square, not the line lookup, rejects a
+  (`crates/app/src/editor/layout/mod.rs:241-254`), so the square, not the line lookup, rejects a
   click below the last line. The square fits inside row 0: 16 px in a row of 28 px at least.
 - The task is the one in the layout's own parse, `Markdown::task_at` at the line's start (D1). A
   carried line holds no document offset.
@@ -458,7 +475,7 @@ The check icon is Lucide `check` in `crates/app/assets/icons/`, `IconName::Check
   (`crates/app/src/editor/reload.rs:24-26`). Three matching bytes would not prove the task is the
   same one. A mismatch edits nothing, and the click places the caret as any click does. Zed only
   debug-asserts here (`vendor/zed-reference/crates/markdown_preview/src/markdown_preview_view.rs:1220`).
-- The edit is `Task::flip` (`gutters.rs:59-69`): the middle byte, `x` for an unchecked one, a
+- The edit is `Task::flip` (`gutters.rs:124-130`): the middle byte, `x` for an unchecked one, a
   space for `x` or `X`. So `[\t]`, which pulldown-cmark reads as unchecked, flips to `[x]`, and a
   flip back writes `[ ]`: the tab is not restored. A vertical tab or a form feed goes the same way. `EditorState::apply_diff` runs one `Buffer::transact`: one undo step, merged with neither
   neighbour. The click then collapses the caret at the text start the layout holds, mapped through
@@ -512,7 +529,7 @@ task since 0.13.24 (forum 14634).
    its own. This is the line's only candidate.
 3. A line where no item opens: first the checkbox at the fallback's content start, when the
    fallback finds an item; then `- [ ] ` after the line's leading `[ \t>]*` (`line_start_prefix`,
-   `parse.rs:229-237`).
+   `parse.rs:203-211`).
 
 `- [ ] ` is offered only where no item opens (Open question 6, decided). On a line where an item
 opens it would land at the first item's marker, which would then read as the new task's text, so
@@ -604,8 +621,8 @@ item's own text: every paragraph directly inside the item, continuation and lazy
 
 - **Set where the marker is decided.** The pending slot (D1) resolves after `Start(Item)`, or after
   one `Start(Paragraph)` in a loose item. When it resolves a checked task that gets a box, `DONE`
-  goes to the item's `Open` and to every element opened inside it so far (`parse.rs:88-93`).
-  Later paragraphs inherit it through `Open::enter` (`parse.rs:280-299`).
+  goes to the item's `Open` and to every element opened inside it so far (`parse.rs:90-95`).
+  Later paragraphs inherit it through `Open::enter` (`parse/open.rs:30-56`).
 - **Not inherited by a block.** `Open::enter` drops `DONE` when a list, a quote or a code block
   opens inside the item, so nested items are not struck. Any other block of the item, a heading, a
   table or an HTML block, inherits it and is struck: it is the item's own text as much as a
@@ -665,13 +682,13 @@ A distinct box colour waits for a theme that asks for one.
   or through a change of the gutter, which `Gutter::same` sees. So `changed` walks no vector for
   marks.
 - **Lazy lines.** A line that is lazy in a quote still follows the rebuild of the line above
-  (`lazy_gutter`, `shape.rs:167-176`). A line that is lazy only in an item needs no such rule,
+  (`lazy_gutter`, `shape.rs:168-175`). A line that is lazy only in an item needs no such rule,
   because its item part is its own.
 - **A reveal flip.** A reveal flip dirties its line through `Carry::flipped`
   (`crates/app/src/editor/layout/dirty.rs:69-79`). A bullet's reveal keeps the gutter's width. A
   task's reveal can widen it, so that line reshapes at a new wrap width. The text and its runs stay
   the same, because the prefix range does not depend on the state.
-- **Caret moves.** `is_shaped_from` (`layout/mod.rs:113-123`) compares the conceals the selection
+- **Caret moves.** `is_shaped_from` (`layout/mod.rs:115-125`) compares the conceals the selection
   touches. So a reveal reshapes, and a caret move inside a revealed item part does not.
 - **The oracle.** The layout oracle of the incremental-draw spec (D10) holds tasks, toggles and `⌘L`
   batches in its alphabet (`crates/app/src/editor/layout/tests.rs`). Its toggle clicks a box of the
@@ -683,7 +700,7 @@ A distinct box colour waits for a theme that asks for one.
 **The box rule.** A task item gets a box when it is a gutter item (D11).
 
 - This is the same rule that gives an item its slots. `Open::enter` evaluates it once per element.
-- It replaces T5's byte scan for a `>` before the marker (`task_gutter`, `gutters.rs:152-190`).
+- It replaced T5's byte scan for a `>` before the marker (`task_gutter`, removed in T6c1).
 - The two rules agree once `gutter` counts columns before each `>` (D1). A marker line opens an
   item, so it is never lazy, and it holds all its `>`. So the scan's first check,
   `quotes.len() == depth`, holds on every gutter item's marker line.
@@ -711,8 +728,8 @@ items that open on the same line keep their marks in their own slots.
 **Which items.**
 
 - A gutter item is a list item whose ancestors are leading quotes, gutter items and their lists.
-- `Open::enter` (`crates/markdown/src/parse.rs:279-299`) decides this once per element, beside
-  `leading`. A list or an item is `gutter` when its parent is `gutter` or when it has no parent. A
+- `Open::enter` (`crates/markdown/src/parse/open.rs:30-56`) decides this once per element, beside
+  `leading`; `Open::in_gutter` (`parse/open.rs:59-61`) reads it for the next item. A list or an item is `gutter` when its parent is `gutter` or when it has no parent. A
   quote is `gutter` when it is leading.
 - Only a gutter item gets slots.
 - Any other item keeps its marker inline, as `•` or as the number, behind the `>` that stops the
@@ -751,14 +768,14 @@ code block, a table, and a quote inside the item.
 - Its item part is its blanks from the quote part's end, as long as each blank's column is below the
   innermost gutter item's hang column.
 - The hang column is the column after the marker line's item part, by `column_after`
-  (`crates/markdown/src/cycle.rs:167-173`). So in `-\ta\n    b`, both lines hide four columns, and
+  (`crates/markdown/src/items.rs:236-241`). So in `-\ta\n    b`, both lines hide four columns, and
   `b` starts where `a` does.
 - So its text starts where the item's text starts, as a wrapped row does.
 - Columns count from the line's start, and a tab stops at the next multiple of 4 (D1, columns).
 - The walk computes an item's hang column the first time it meets such a line.
-- `column_after` moves to `items.rs`, and `cycle.rs` calls it there. So does the marker's end that
-  `checkbox_at` reads (`cycle.rs:144-165`): one byte for a bullet, the digits and the `.` or `)` for
-  a number.
+- `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
+  (`items.rs:228-233`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
+  a bullet, the digits and the `.` or `)` for a number.
 
 **A lazy line** hides the blanks it has and starts at the same place, because it continues the
 item's paragraph, as a wrapped row does. A quoted lazy line carries its quote part and takes its
@@ -777,7 +794,7 @@ own item part (D3, D).
 
 - An item's range from its `Start(Item)` event holds its lazy lines, and the blank lines after it.
 - The walk enters an item at its marker's line. The range can start on the line before
-  (`marker_start`, `gutters.rs:192-199`).
+  (`marker_start`, `crates/markdown/src/items.rs:219-224`).
 
 | Text | Line | Item part | Slots |
 |---|---|---|---|
@@ -863,7 +880,7 @@ own item part (D3, D).
 `inkra-markdown`, proptest:
 
 - The conceal properties and the G-properties, for a gutter with an item part: `depth` may be 0
-  with a non-empty range when `item` is set (`parse/tests/gutters.rs:228-236`). T6c1 adds:
+  with a non-empty range when `item` is set (`parse/tests/gutters.rs:243-246`). T6c1 adds:
   - Each item part lies in its line, past its quote part.
   - Its own conceals are its quotes plus at most one item conceal, never an empty one.
   - Every gutter item's marker line holds a gutter whose marks are that item's markers.
@@ -928,8 +945,11 @@ constants, never with a glyph's computed width.
 - The layout oracle, its toggle through `DocumentLayout::task_at` (T6a). Only a concealed box can
   be clicked; the `⌘L` step still cycles revealed tasks.
 
-Scene: `markdown-lists`, a new scene (`crates/app/src/shot/scenes/markdown_lists.rs`, registered in
-`crates/app/src/shot/scenes.rs`). It shows:
+Scenes: `markdown-lists` and `markdown-lists-end`, on one note (`LISTS`,
+`crates/app/src/shot/scenes/markdown_blocks.rs:58-93`), in that file's `SCENES` (111-132) beside the
+`markdown-blocks` scenes. `scenes.rs` sits at its line ceiling, so the note gets no module of its
+own. The note does not fit one window: `markdown-lists` shows its start, `markdown-lists-end` its
+end. Together they show:
 
 - bullets three levels deep, nested by two spaces, by four spaces and by a tab;
 - a wrapped bullet;
@@ -942,8 +962,8 @@ Scene: `markdown-lists`, a new scene (`crates/app/src/shot/scenes/markdown_lists
 - a code block in an item, with a blank line;
 - the caret on a nested bullet's `-`, with its raw `  - ` ending at its text, which does not move.
 
-Re-render `markdown-blocks` (`crates/app/src/shot/scenes/markdown_blocks.rs:7-34`, its `shows` at
-`scenes.rs:439-448`) and the concealment scene (`scenes.rs:119-123`). The box now has its gap, and
+Re-render `markdown-blocks` (`crates/app/src/shot/scenes/markdown_blocks.rs:7-38`, its `shows` at
+111-122) and the concealment scene, `editor-concealed` (`scenes.rs:119-123`). The box now has its gap, and
 the quoted task's lazy line starts under its text. Re-render `code-blocks` too, for its block in a
 list. To render and look: `cargo run -p inkra-app --features shot --example shot markdown-lists`.
 
@@ -1013,15 +1033,15 @@ at. T1a through T5 are merged (History).
       - One conceal per item part, none when it is empty, and `•` conceals only for other items
         (D2).
       - `Gutter::same` over the item part and its keys (D1, D9).
-      - `parse.rs` stands at 390 of its 400 lines. It gains only `Open::gutter` and the walk's call.
-        If it passes 400, move `Open` to `parse/open.rs` first, in a commit of its own.
+      - `Open` moved to `parse/open.rs` first, in a commit of its own, so `parse.rs` stays under
+        400 lines. `parse.rs` gains only the gutter flag's read and the walk's call.
     - `app`:
       - `LIST_SLOT_GAP`.
       - The quote geometry, keyed by the quote part's text.
       - Slots and marks per line, the number widths per key, and `paint_marks` with the baseline
         offset (D3, D4).
       - The raw item part, right-aligned, in two pieces (D3).
-      - If `prefix/gutter.rs` passes 400 lines, move the marks to `prefix/marks.rs`.
+      - The marks live in `prefix/marks.rs`, beside `prefix/gutter.rs`.
     - Interim state: lines other than a marker line still show their blanks in the text. The scene
       shows this, and T6c2 makes those lines start at the item's text.
     - Tests:
@@ -1034,7 +1054,8 @@ at. T1a through T5 are merged (History).
       - `cargo bench -p inkra-markdown --bench parse -- --quick 'markdown_parse/500000$|cycle_tasks_all'`.
         Gate: `markdown_parse/500000` within 3%.
       - `cargo bench -p inkra-app --features bench --bench layout`. Gate: within 5% (D1).
-    - Scene: the marker lines of `markdown-lists`; re-render `markdown-blocks`.
+    - Scene: the marker lines of `markdown-lists` and `markdown-lists-end`; re-render
+      `markdown-blocks`.
 11. **T6c2, an item's other lines** (~0.5 d). Stacked on T6c1: `task-boxes-t6c2` on
     `task-boxes-t6c1`.
     - `inkra-markdown`:
@@ -1048,7 +1069,7 @@ at. T1a through T5 are merged (History).
     - Tests: the T6c2 items of Tests. The oracle's alphabet gains a lazy line and two leading
       blanks.
     - Measure as for T6c1, with the same gates against `task-boxes-t6b`.
-    - Scene: the whole of `markdown-lists`; re-render `code-blocks`.
+    - Scene: the whole of `markdown-lists` and `markdown-lists-end`; re-render `code-blocks`.
 
 **The merge.**
 
@@ -1155,6 +1176,21 @@ Newest last. Each entry says what changed and why.
     layout gate (D1).
   - The width key, the digit count and the delimiter, was chosen as the smallest key the layout can
     measure (D3).
+- **T6c1, the slots** (2026-11-19, `task-boxes-t6c1`). Marker lines show their marks in slots; other
+  lines of an item keep their blanks until T6c2.
+  - `Open` moved to `parse/open.rs` in a commit of its own; `Items` moved to `items.rs`.
+  - `gutter` makes one blank scan per `>`. The separate check for an opening quote was dead:
+    pulldown-cmark opens a quote only where the same scan finds it, and mutants showed no input
+    tells the two apart.
+  - The walk groups a line's items by `line_start`. The comparison against the line's end it
+    replaced had a mutant no test could kill, as no marker sits on a `\n`.
+  - `ItemPart::marks` takes the item part's text and drops a task's own bullet (D1).
+  - `Marks` takes each glyph's advance through a function, so a test fakes uneven digits: headless
+    glyphs all advance alike, and no window test can tell the widest digit.
+  - The list scenes live in `scenes/markdown_blocks.rs` (Tests). The code-blocks scenes moved into
+    their module first, to make room in `scenes.rs`.
+  - Measured in alternating rounds against `task-boxes-t6b`: `markdown_parse/500000` +1.6%, every
+    layout case within 5%.
 
 **Reversed decisions.**
 
@@ -1232,8 +1268,9 @@ Newest last. Each entry says what changed and why.
   toggles too. It checks the version before writing (G), and moves the caret. Zed's editor has no
   toggle action; `⌘L` follows Obsidian.
 - **From markdown-blocks S3.** The conceal covers the item part (B); a concealed width does not
-  depend on the state (C); boxes are found per line, not from a vector (E). There is no `marks.rs`
-  module and no new colour token; the strike and the key are added.
+  depend on the state (C); boxes are found per line, not from a vector (E). The marks are laid out
+  per line in `prefix/marks.rs`, never as a document-wide vector, and there is no new colour token;
+  the strike and the key are added.
 - **From this spec, in T2.** `task_at` returns the task's flip as a `Diff` at the layout's version,
   and its text start; `apply_diff` makes the check (G). The hit test (F) is containment in the
   painted square, which fits inside row 0, so it has no separate row check.
