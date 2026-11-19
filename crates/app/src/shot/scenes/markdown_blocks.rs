@@ -54,8 +54,16 @@ fn revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
 }
 
 /// A list's marker lines and its other lines: continuation, lazy and code lines start at their
-/// item's text (task boxes spec, D3, D11).
-const LISTS: &str = "- A top bullet\n\
+/// item's text; one list's numbers share a width; an empty item's mark sits as a typed one's (task
+/// boxes spec, D3, D4, D11).
+const LISTS: &str = "8. Eight\n\
+                     9. Nine\n\
+                     \x20\x20\x20and its second line\n\
+                     10. Ten\n\
+                     \x20\x20\x20\x20- A child under ten\n\
+                     11. Eleven\n\
+                     \n\
+                     - A top bullet\n\
                      \x20\x20- Nested by two spaces\n\
                      \x20\x20\x20\x20- Three levels deep\n\
                      \x20\x20\x20\x20\x20\x20with its second line\n\
@@ -71,13 +79,6 @@ const LISTS: &str = "- A top bullet\n\
                      - [x] A done task\n\
                      - A bullet after the tasks\n\
                      \n\
-                     8. Eight\n\
-                     9. Nine\n\
-                     \x20\x20\x20and its second line\n\
-                     10. Ten\n\
-                     \x20\x20\x20\x20- A child under ten\n\
-                     11. Eleven\n\
-                     \n\
                      1) One\n\
                      2) Two\n\
                      3) Three\n\
@@ -87,8 +88,10 @@ const LISTS: &str = "- A top bullet\n\
                      \n\
                      1. [ ] An ordered task\n\
                      \x20\x20\x20- Its child\n\
+                     2.\x20\n\
                      \n\
                      - # A heading in a bullet\n\
+                     -\x20\n\
                      - [ ] A task holding code:\n\
                      \n\
                      \x20\x20```rust\n\
@@ -99,11 +102,11 @@ const LISTS: &str = "- A top bullet\n\
                      \x20\x20}\n\
                      \x20\x20```";
 
-/// `down home` puts the caret on the second line's start, before its `  - `.
+/// Eight lines down, the caret lands on the nested bullet's line; `home` puts it before its `  - `.
 fn caret_on_a_nested_bullet(stage: &mut Stage) -> WindowHandle<AppShell> {
     let window = stage.open_note(LISTS);
     stage.focus(window);
-    stage.keys(window, "cmd-up down home");
+    stage.keys(window, "cmd-up down down down down down down down down home");
     window
 }
 
@@ -128,12 +131,12 @@ pub(super) const SCENES: [Scene; 4] = [
     },
     Scene {
         name: "markdown-lists",
-        shows: "list marker lines in slots: each `•` centred on the box's axis, each text one slot right; children by two spaces, four spaces and a tab start their slot at the parent's text, three levels deep; a wrapped bullet's second row at its text; tasks' boxes in the bullets' column, their text in the bullets' text column; a third-level bullet's second line, a continuation line and a lazy line at their item's text; the caret on the second line's start shows its raw `  - ` ending at its text, which does not move",
+        shows: "8. to 11. on one number column, their dots aligned across 9. to 10., their texts in one column, 9.'s second line at its text, 10.'s child `•` under its text; list marker lines in slots: each `•` centred on the box's axis, each text one slot right; children by two spaces, four spaces and a tab start their slot at the parent's text, three levels deep; a wrapped bullet's second row at its text; tasks' boxes in the bullets' column, their text in the bullets' text column; a third-level bullet's second line, a continuation line and a lazy line at their item's text; the caret on the second line's start shows its raw `  - ` ending at its text, which does not move",
         open: caret_on_a_nested_bullet,
     },
     Scene {
         name: "markdown-lists-end",
-        shows: "the same note's end: 1) to 3) on their own column; a quoted bullet's second line at its text; an ordered task's number then its box, its child under its text; a `•` on a heading's baseline; a task holding code: the caret on the closing fence shows both fences; the code block's lines, its blank line included, start at the task's text, and so does its background; `let y = 2;` keeps its own indent, four columns right of `if`",
+        shows: "the same note's end: 1) to 3) on their own column; a quoted bullet's second line at its text; an ordered task's number then its box, its child under its text, then an empty `2.` on its row as `1.` sits on its own; a `•` on a heading's baseline, then an empty item's `•` where a typed item's sits; a task holding code: the caret on the closing fence shows both fences; the code block's lines, its blank line included, start at the task's text, and so does its background; `let y = 2;` keeps its own indent, four columns right of `if`",
         open: lists_end,
     },
 ];
