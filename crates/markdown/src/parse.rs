@@ -21,7 +21,7 @@ pub struct Markdown {
     /// In document order, never empty; a setext heading's underline is not part of it.
     pub headings: Vec<Heading>,
     /// Sorted by `range.start`; one per line inside a leading quote, lazy lines included, or
-    /// holding a gutter item's marker (task boxes spec, D11).
+    /// held by a gutter item (task boxes spec, D11).
     pub gutters: Vec<Gutter>,
     /// Sorted by `range.start`; blocks never nest or overlap.
     pub code_blocks: Vec<CodeBlock>,
@@ -144,7 +144,10 @@ fn parse_terminated(text: &str) -> Markdown {
             _ => {}
         }
     }
-    let (gutters, mut bullets, unboxed) = items.gutters(text, &quotes, structure.items());
+    let blocks = code_blocks
+        .iter()
+        .map(|(range, _)| range.start.get()..range.end.get());
+    let (gutters, mut bullets, unboxed) = items.gutters(text, &quotes, structure.items(), blocks);
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()

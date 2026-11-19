@@ -101,6 +101,12 @@ fn two_blanks_before_a_bullet_dirty_its_line_alone() {
     assert_eq!(answered("- a\n- b\n\nz", 4, 0, "  "), [(4, 8)]);
 }
 
+/// The blank line ends the item: both lazy lines lose their gutter, and `- a` keeps its own.
+#[test]
+fn a_blank_line_that_ends_an_item_dirties_the_lines_it_releases() {
+    assert_eq!(answered("- a\nb\nc\n\nz", 4, 0, "\n"), [(4, 5), (7, 7)]);
+}
+
 /// `10.` widens the list's width key: every item part of the list and its child, each once, and
 /// not the paragraph after it.
 #[test]

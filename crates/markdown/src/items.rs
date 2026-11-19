@@ -1,6 +1,7 @@
 //! List items in the gutter (task boxes spec, D1, D11): each item's marker as the parse decides it,
-//! each list's width key, and the walk that gives every marker line of a gutter item its item part.
+//! each list's width key, and the walk that gives every line a gutter item holds its item part.
 
+use std::iter::Peekable;
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
@@ -8,7 +9,7 @@ use pulldown_cmark::{Event, Tag, TagEnd};
 
 use crate::Conceal;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
-use crate::spans::{line_start, to_offsets};
+use crate::spans::{line_ranges, line_start, to_offsets};
 
 /// A gutter item as the parse met it.
 struct Record {
@@ -137,21 +138,28 @@ impl Items {
         done
     }
 
-    /// The gutters, each marker line's item part after its quote part, the bullets' conceals, and
-    /// the lines holding a task with no box. `quotes` are the leading quotes' ranges and `items`
-    /// every item's marker, both in document order. One walk, after the parse's one pass, so every
-    /// width key is final (D1).
+    /// The gutters, each held line's item part after its quote part, the bullets' conceals, and
+    /// the lines holding a task with no box. `quotes` are the leading quotes' ranges, `items` every
+    /// item's marker and `blocks` every code block's range without its last `\n`, all in document
+    /// order. One walk, after the parse's one pass, so every width key is final (D1).
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
         items: &[ByteOffset],
+        blocks: impl Iterator<Item = Range<usize>>,
     ) -> (Vec<Gutter>, Vec<Conceal>, Vec<Range<usize>>) {
-        let mut quote_lines = quote_gutters(text, quotes).into_iter().peekable();
-        let mut out = Vec::with_capacity(quote_lines.len() + self.records.len());
-        // The gutter items holding the line whose markers stand on earlier lines, outermost first.
-        let mut held: Vec<&Record> = Vec::new();
+        let quote_lines = quote_gutters(text, quotes);
+        let mut walk = Walk {
+            text,
+            out: Vec::with_capacity(quote_lines.len() + self.records.len()),
+            quote_lines: quote_lines.into_iter().peekable(),
+            blocks: blocks.peekable(),
+            held: Vec::new(),
+        };
         let mut rest = self.records.as_slice();
+        // The first line past the last marker line.
+        let mut next = 0;
         while let Some(first) = rest.first() {
             let marker = items[first.marker].get();
             let line = line_start(text, marker);
@@ -161,15 +169,9 @@ impl Items {
             let (opening, after) = rest.split_at(count);
             let last = &opening[count - 1];
             rest = after;
-            while held.last().is_some_and(|item| item.end <= marker) {
-                held.pop();
-            }
-            out.extend(std::iter::from_fn(|| {
-                quote_lines.next_if(|gutter| gutter.range.start.get() < line)
-            }));
-            let mut gutter = quote_lines
-                .next_if(|gutter| gutter.range.start.get() == line)
-                .unwrap_or_else(|| gutter_at(line, 0));
+            walk.held_lines(&self, next, line);
+            walk.release(marker);
+            let mut gutter = walk.quote_line(line).unwrap_or_else(|| gutter_at(line, 0));
             // A marker line opens an item, so it is never lazy (D10).
             debug_assert_eq!(
                 gutter.quotes.len(),
@@ -181,36 +183,133 @@ impl Items {
                 !text[gutter.range.end.get()..marker].contains('>'),
                 "a `>` between the quote part and a marker"
             );
-            let item = self.item_part(gutter.range.end, &held, opening);
+            let item = self.item_part(gutter.range.end, &walk.held, opening);
             let end = item.task.as_ref().map_or_else(
                 || marker_end(text, items[last.marker].get()),
                 |task| task.checkbox.end.get(),
             );
             let blank = matches!(text.as_bytes().get(end), Some(b' ' | b'\t'));
-            gutter.range.end = ByteOffset::new(end + usize::from(blank));
+            let end = end + usize::from(blank);
+            gutter.range.end = ByteOffset::new(end);
             gutter.item = Some(item);
-            out.push(gutter);
-            held.extend(opening);
+            walk.out.push(gutter);
+            walk.held.extend(opening.iter().map(|record| Held {
+                record,
+                marker_line: line..end,
+                hang: None,
+            }));
+            next = line_ranges(text, line)
+                .next()
+                .map_or(text.len(), |line| line.end + 1);
         }
-        out.extend(quote_lines);
-        (out, self.bullets, self.unboxed)
+        walk.held_lines(&self, next, text.len());
+        walk.out.extend(walk.quote_lines);
+        (walk.out, self.bullets, self.unboxed)
     }
 
-    /// The item part from `start` of a marker line that `held` hold and on which `opening` open.
-    fn item_part(&self, start: ByteOffset, held: &[&Record], opening: &[Record]) -> ItemPart {
+    /// The item part from `start` of a line that `held` hold and on which `opening` open.
+    fn item_part(&self, start: ByteOffset, held: &[Held<'_>], opening: &[Record]) -> ItemPart {
         // An ordered task shows its number and its box; any other item one mark (D11).
         let columns = |item: &Record| 1 + usize::from(item.list.is_some() && item.task.is_some());
         ItemPart {
             start,
-            indent: held.iter().map(|item| columns(item)).sum(),
+            indent: held.iter().map(|held| columns(held.record)).sum(),
             numbers: held
                 .iter()
-                .copied()
+                .map(|held| held.record)
                 .chain(opening)
                 .filter_map(|item| item.list.map(|list| self.numbers[list]))
                 .collect(),
             task: opening.last().and_then(|item| item.task.clone()),
         }
+    }
+}
+
+/// A gutter item holding the lines the walk visits.
+struct Held<'r> {
+    record: &'r Record,
+    /// From its marker line's start through that line's item part.
+    marker_line: Range<usize>,
+    /// The column after its marker line's item part, computed at its first other line (D11).
+    hang: Option<usize>,
+}
+
+/// The walk's cursors, each moving forward only: the quote lines not yet given out, the code
+/// blocks not yet passed, the gutter items holding the line, outermost first, and the gutters so
+/// far.
+struct Walk<'t, 'r, B: Iterator<Item = Range<usize>>> {
+    text: &'t str,
+    quote_lines: Peekable<std::vec::IntoIter<Gutter>>,
+    blocks: Peekable<B>,
+    held: Vec<Held<'r>>,
+    out: Vec<Gutter>,
+}
+
+impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
+    /// Drops the items that end by `at`.
+    fn release(&mut self, at: usize) {
+        while self.held.last().is_some_and(|held| held.record.end <= at) {
+            self.held.pop();
+        }
+    }
+
+    /// Gives out the quote lines before the line start `line`, and takes the one at it.
+    fn quote_line(&mut self, line: usize) -> Option<Gutter> {
+        let quote_lines = &mut self.quote_lines;
+        self.out.extend(std::iter::from_fn(|| {
+            quote_lines.next_if(|gutter| gutter.range.start.get() < line)
+        }));
+        self.quote_lines
+            .next_if(|gutter| gutter.range.start.get() == line)
+    }
+
+    /// The lines from the line start `from` to `to` that an item holds, where no item opens: each
+    /// hides its blanks below the innermost item's hang column. A blank line takes no item part,
+    /// unless a code block holds it (D11). Stops where no item holds the line.
+    fn held_lines(&mut self, items: &Items, from: usize, to: usize) {
+        let text = self.text;
+        let bytes = text.as_bytes();
+        for Range { start: line, end } in line_ranges(text, from).take_while(|line| line.start < to)
+        {
+            self.release(line);
+            let Some(innermost) = self.held.last_mut() else {
+                return;
+            };
+            let hang = *innermost
+                .hang
+                .get_or_insert_with(|| column_after(0, &bytes[innermost.marker_line.clone()]));
+            let quoted = self.quote_line(line);
+            let start = quoted
+                .as_ref()
+                .map_or(line, |gutter| gutter.range.end.get());
+            let blank = bytes[start..end]
+                .iter()
+                .all(|&byte| matches!(byte, b' ' | b'\t'));
+            if blank && !self.in_block(line, end) {
+                self.out.extend(quoted);
+                continue;
+            }
+            let column = column_after(0, &bytes[line..start]);
+            let blanks = bytes[start..end]
+                .iter()
+                .scan(column, |column, &byte| {
+                    let at = *column;
+                    *column = column_after(at, &[byte]);
+                    Some((at, byte))
+                })
+                .take_while(|&(at, byte)| at < hang && matches!(byte, b' ' | b'\t'))
+                .count();
+            let mut gutter = quoted.unwrap_or_else(|| gutter_at(line, 0));
+            gutter.item = Some(items.item_part(ByteOffset::new(start), &self.held, &[]));
+            gutter.range.end = ByteOffset::new(start + blanks);
+            self.out.push(gutter);
+        }
+    }
+
+    /// Whether a code block holds the line from `line` to `end`; lines come in order.
+    fn in_block(&mut self, line: usize, end: usize) -> bool {
+        while self.blocks.next_if(|block| block.end < line).is_some() {}
+        self.blocks.peek().is_some_and(|block| block.start <= end)
     }
 }
 

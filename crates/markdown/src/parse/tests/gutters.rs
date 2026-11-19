@@ -112,11 +112,14 @@ fn an_indented_code_block_keeps_its_indent_out_of_the_gutter() {
 
 #[test]
 fn a_quote_inside_a_list_item_has_no_quote_part() {
-    assert_eq!(gutters("- > a\n  > b"), vec![("- ", vec![], 0)]);
+    assert_eq!(
+        gutters("- > a\n  > b"),
+        vec![("- ", vec![], 0), ("  ", vec![], 0)]
+    );
     assert_eq!(gutters("> - > a"), vec![("> - ", vec![0], 1)]);
     assert_eq!(
         gutters("> - a\n>   b"),
-        vec![("> - ", vec![0], 1), ("> ", vec![6], 1)]
+        vec![("> - ", vec![0], 1), (">   ", vec![6], 1)]
     );
 }
 
@@ -246,7 +249,7 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
         );
         prop_assert!(gutter.quotes.len() <= gutter.depth);
         prop_assert_eq!(
-            gutter.quotes.is_empty() && gutter.item.is_none(),
+            gutter.quotes.is_empty() && gutter.quote_end() == gutter.range.end,
             start == end
         );
         for quote in &gutter.quotes {
@@ -263,7 +266,10 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
             .filter(|conceal| gutter.range.contains(&conceal.marker.start))
             .collect();
         if let Some(item) = &gutter.item {
-            item_is_well_formed(text, gutter, item, inside.pop())?;
+            let own = (item.start < gutter.range.end)
+                .then(|| inside.pop())
+                .flatten();
+            item_is_well_formed(text, gutter, item, own)?;
         }
         for (conceal, quote) in inside.iter().zip(&gutter.quotes) {
             prop_assert_eq!(conceal.marker.clone(), *quote..*quote + 1);
@@ -274,16 +280,16 @@ fn gutters_are_well_formed(text: &str) -> Result<(), TestCaseError> {
     Ok(())
 }
 
-/// G5: an item part follows all its line's `>` and the quote part's blank, holds no `>`, ends at
-/// most one space or tab past its last mark or checkbox, and its conceal hides it through that
-/// mark (D1, D2, D11).
+/// G5: an item part follows its line's `>` and the quote part's blank, and holds no `>`. On an
+/// item's other line it is blanks only, all concealed, with no conceal when empty. On a marker
+/// line, which holds all its `>`, it ends at most one space or tab past its last mark or checkbox,
+/// and its conceal hides it through that mark (D1, D2, D11).
 fn item_is_well_formed(
     text: &str,
     gutter: &Gutter,
     item: &ItemPart,
     conceal: Option<&Conceal>,
 ) -> Result<(), TestCaseError> {
-    prop_assert_eq!(gutter.quotes.len(), gutter.depth);
     let quote_end = gutter
         .quotes
         .last()
@@ -293,6 +299,14 @@ fn item_is_well_formed(
     let part = &text[item.start.get()..gutter.range.end.get()];
     prop_assert!(!part.contains(['>', '\n']), "{gutter:?} in {text:?}");
     let marked = part.trim_end_matches([' ', '\t']);
+    if marked.is_empty() {
+        prop_assert!(item.task.is_none(), "{gutter:?} in {text:?}");
+        let whole = conceal.map(|conceal| (conceal.element.clone(), conceal.marker.clone()));
+        let range = item.start..gutter.range.end;
+        prop_assert_eq!(whole, (!part.is_empty()).then(|| (range.clone(), range)));
+        return Ok(());
+    }
+    prop_assert_eq!(gutter.quotes.len(), gutter.depth);
     prop_assert!(
         ["", " ", "\t"].contains(&&part[marked.len()..]),
         "{gutter:?} in {text:?}"

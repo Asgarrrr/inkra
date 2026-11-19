@@ -181,9 +181,66 @@ fn a_tab_after_a_quotes_blank_still_leads_the_next_quote() {
     assert_eq!(part(text, gutter), Some(expect("- [ ] ", 0, &[], true)));
 }
 
-/// Each gutter item's marker, and the marks its line should show for it: a task's own bullet gives
-/// way to its box, a number shows as typed. Read by a pulldown-cmark pass of its own.
-fn gutter_items(text: &str) -> Vec<(usize, Option<ItemMarker>, bool)> {
+/// An item's other lines hide their blanks below its hang column, so they start at its text (D11).
+#[test]
+fn an_items_other_lines_hide_their_blanks_below_its_hang_column() {
+    for (text, line, source, indent) in [
+        ("- a\n  b", 1, "  ", 1),
+        ("- a\nb", 1, "", 1),
+        ("- a\n  - b\n    c", 2, "    ", 2),
+        ("- a\n  - b\n  c", 2, "  ", 2),
+        ("-\ta\n\tb", 1, "\t", 1),
+        ("-\ta\n    b", 1, "    ", 1),
+        ("-   a\n    b", 1, "  ", 1),
+        ("> - a\n>   b", 1, "  ", 1),
+        ("> - a\nb", 1, "", 1),
+        ("1. [ ] a\n   b", 1, "   ", 2),
+        ("- a\n  > - b", 1, "  ", 1),
+    ] {
+        assert_eq!(
+            line_part(text, line),
+            Some(expect(source, indent, &[], false)),
+            "{text:?}"
+        );
+    }
+    assert_eq!(numbers("10. a\n    b"), vec![vec![key(2, b'.')]; 2]);
+}
+
+#[test]
+fn an_items_blanks_conceal_whole_and_an_empty_part_not_at_all() {
+    assert_eq!(concealed("- a\n  b"), [("-", "-", ""), ("  ", "  ", "")]);
+    assert_eq!(concealed("- a\nb"), [("-", "-", "")]);
+}
+
+/// A fenced block's lines all take the item part, its blank line too; a blank line elsewhere
+/// takes no gutter (D11).
+#[test]
+fn a_code_blocks_lines_take_the_item_part_and_other_blank_lines_none() {
+    let text = "- a\n\n  ```\n  x\n  \n  ```\n\n  b";
+    for line in 2..=5 {
+        assert_eq!(
+            line_part(text, line),
+            Some(expect("  ", 1, &[], false)),
+            "line {line}"
+        );
+    }
+    let starts = |text: &str| -> Vec<usize> {
+        let gutters = parse(text).gutters.into_iter();
+        gutters.map(|gutter| gutter.range.start.get()).collect()
+    };
+    assert_eq!(starts(text), [0, 5, 11, 15, 18, 25]);
+    assert_eq!(starts("- a\n\n  b"), [0, 5]);
+    assert_eq!(starts("> - a\n>\n>   b").len(), 3);
+    assert_eq!(line_part("> - a\n>\n>   b", 1), None);
+}
+
+/// A gutter item as the oracle reads it: its marker, the mark its line should show for it, whether
+/// it is a task, and its range's end.
+type Oracle = (usize, Option<ItemMarker>, bool, usize);
+
+/// Each gutter item, in order: a task's own bullet gives way to its box, a number shows as typed.
+/// Read by a pulldown-cmark pass of its own.
+fn gutter_items(text: &str) -> Vec<Oracle> {
     let text = format!("{text}\n");
     // Each open element: whether it is in the gutter, and whether it is a leading quote.
     let mut open: Vec<(bool, bool)> = Vec::new();
@@ -218,7 +275,7 @@ fn gutter_items(text: &str) -> Vec<(usize, Option<ItemMarker>, bool)> {
                         )
                     };
                     pending = Some(items.len());
-                    items.push((marker, Some(mark), false));
+                    items.push((marker, Some(mark), false, range.end));
                 }
                 open.push((leading || listed, leading));
             }
@@ -231,16 +288,16 @@ fn gutter_items(text: &str) -> Vec<(usize, Option<ItemMarker>, bool)> {
     items
 }
 
-fn task(item: &(usize, Option<ItemMarker>, bool)) -> (usize, Option<ItemMarker>, bool) {
+fn task(item: &Oracle) -> Oracle {
     let mark = item.1.clone().filter(|mark| *mark != ItemMarker::Bullet);
-    (item.0, mark, true)
+    (item.0, mark, true, item.3)
 }
 
 /// Every gutter item's marker line holds a gutter whose marks are its markers, its box its task's,
 /// with all its `>` and none between them and its markers (D1, D10, D11).
 fn marker_lines_are_well_formed(text: &str) -> Result<(), TestCaseError> {
     let markdown = parse(text);
-    for (marker, _, _) in gutter_items(text) {
+    for (marker, _, _, _) in gutter_items(text) {
         let line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
         let gutter = gutter_on(&markdown, line);
         let gutter = gutter
@@ -257,17 +314,17 @@ fn marker_lines_are_well_formed(text: &str) -> Result<(), TestCaseError> {
         );
         let expected: Vec<_> = gutter_items(text)
             .into_iter()
-            .filter(|(at, _, _)| text[..*at].rfind('\n').map_or(0, |n| n + 1) == line)
+            .filter(|(at, _, _, _)| text[..*at].rfind('\n').map_or(0, |n| n + 1) == line)
             .collect();
         let marks: Vec<_> = item
             .marks(&text[item.start.get()..gutter.range.end.get()])
             .collect();
         let wanted: Vec<_> = expected
             .iter()
-            .filter_map(|(_, mark, _)| mark.clone())
+            .filter_map(|(_, mark, _, _)| mark.clone())
             .collect();
         prop_assert_eq!(marks, wanted, "{:?}", text);
-        let boxed = expected.last().is_some_and(|(_, _, task)| *task);
+        let boxed = expected.last().is_some_and(|(_, _, task, _)| *task);
         prop_assert_eq!(item.task.is_some(), boxed, "{:?}", text);
     }
     Ok(())
@@ -280,7 +337,55 @@ fn gutter_on(markdown: &Markdown, line: usize) -> Option<&Gutter> {
         .find(|gutter| gutter.range.start.get() == line)
 }
 
+/// Every line a gutter item holds that is not blank, of blanks and `>` only, holds an item part,
+/// and no other line holds one (D11).
+fn held_lines_hold_an_item_part(text: &str) -> Result<(), TestCaseError> {
+    let markdown = parse(text);
+    let mut held = Vec::new();
+    for (marker, _, _, end) in gutter_items(text) {
+        let mut line = text[..marker].rfind('\n').map_or(0, |newline| newline + 1);
+        while line < end.min(text.len() + 1) {
+            let line_end = text[line..].find('\n').map_or(text.len(), |len| line + len);
+            if !text[line..line_end]
+                .bytes()
+                .all(|byte| b" \t>".contains(&byte))
+            {
+                let item = gutter_on(&markdown, line).and_then(|gutter| gutter.item.as_ref());
+                prop_assert!(item.is_some(), "no item part at {} in {:?}", line, text);
+            }
+            held.push(line);
+            line = line_end + 1;
+        }
+    }
+    for gutter in markdown
+        .gutters
+        .iter()
+        .filter(|gutter| gutter.item.is_some())
+    {
+        let line = gutter.range.start.get();
+        prop_assert!(
+            held.contains(&line),
+            "an item part at {} in {:?}",
+            line,
+            text
+        );
+    }
+    Ok(())
+}
+
 proptest! {
+    #[test]
+    fn held_lines_hold_an_item_part_on_block_constructs(
+        fragments in prop::collection::vec(syntax_fragment(), 0..40)
+    ) {
+        held_lines_hold_an_item_part(&fragments.concat())?;
+    }
+
+    #[test]
+    fn held_lines_hold_an_item_part_on_list_text(text in "[ \t>*+19.)\\[\\]xa\n-]{0,40}") {
+        held_lines_hold_an_item_part(&text)?;
+    }
+
     #[test]
     fn marker_lines_are_well_formed_on_block_constructs(
         fragments in prop::collection::vec(syntax_fragment(), 0..40)

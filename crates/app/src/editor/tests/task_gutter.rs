@@ -121,23 +121,26 @@ fn toggling_a_task_keeps_its_gutter_width(cx: &mut TestAppContext) {
 
 /// `> - [ ] a` with the lazy line `  b`: a caret on the `>` paints the quote part alone and moves no
 /// text, one at the bullet the item part alone at its own `x`, its text at the raw part's end, and
-/// `b`'s line starts at the quote part's edge. A selection over both paints each part apart.
+/// `b`'s line starts under `a`, its blanks hidden. A selection over both paints each part apart.
 #[gpui::test]
 fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "> - [ ] a\n  b\n\nbody");
     cx.run_until_parked();
     cx.simulate_keystrokes("cmd-down");
-    let (shown, _, xs) = geometry(&window, &mut cx, &[8, 10]);
+    let (shown, _, xs) = geometry(&window, &mut cx, &[8, 12]);
     assert_eq!(shown, []);
     assert_x(xs[0], 2. * GLYPH + slot());
-    assert_x(xs[1], 2. * GLYPH);
+    assert_eq!(xs[1], xs[0]);
     cx.simulate_keystrokes("cmd-up");
-    let (shown, _, quote_xs) = geometry(&window, &mut cx, &[8, 10]);
-    let quote = ("> ".to_owned(), px(0.), xs[1]);
-    assert_eq!(shown, std::slice::from_ref(&quote));
+    let (shown, _, quote_xs) = geometry(&window, &mut cx, &[8, 12]);
+    let [(text, x, quote_end)] = shown.as_slice() else {
+        panic!("{shown:?}");
+    };
+    assert_eq!((text.as_str(), *x), ("> ", px(0.)));
+    assert_x(*quote_end, 2. * GLYPH);
     assert_eq!(quote_xs, xs);
     cx.simulate_keystrokes("right right");
-    let (shown, _, task_xs) = geometry(&window, &mut cx, &[8, 10]);
+    let (shown, _, task_xs) = geometry(&window, &mut cx, &[8, 12]);
     let [(text, x, end)] = shown.as_slice() else {
         panic!("{shown:?}");
     };
@@ -149,8 +152,8 @@ fn the_quote_part_and_the_task_part_reveal_apart(cx: &mut TestAppContext) {
     let (shown, _, both_xs) = geometry(&window, &mut cx, &[8]);
     let texts: Vec<_> = shown.iter().map(|piece| piece.0.as_str()).collect();
     assert_eq!(texts, ["> ", "- [ ] "]);
-    assert_eq!(shown[0], quote);
-    assert_x(shown[1].1, f32::from(xs[1]));
+    assert_eq!(shown[0].2, *quote_end);
+    assert_x(shown[1].1, 2. * GLYPH);
     assert_eq!(shown[1].2, both_xs[0]);
     assert_eq!(both_xs[0], task_xs[0]);
 }

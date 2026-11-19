@@ -16,7 +16,7 @@ pub struct Gutter {
     pub quotes: Vec<ByteOffset>,
     /// The leading quotes that contain the line, `>` or not; 0 on an item line outside a quote.
     pub depth: usize,
-    /// The bytes past the quote part on a marker line of a gutter item (D11).
+    /// The bytes past the quote part on a line a gutter item holds (D11).
     pub item: Option<ItemPart>,
 }
 
