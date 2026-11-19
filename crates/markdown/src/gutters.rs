@@ -125,21 +125,21 @@ impl Markdown {
     /// and its blanks (D2).
     #[must_use]
     pub fn snap(&self, offset: ByteOffset, bias: Bias) -> ByteOffset {
-        // The one gutter whose line can hold `offset` inside: the first ending at or past it.
+        // The one gutter whose line can hold `offset` inside: the last starting at or before it.
         let at = self
             .gutters
-            .partition_point(|gutter| gutter.range.end < offset);
-        let Some(gutter) = self.gutters.get(at) else {
+            .partition_point(|gutter| gutter.range.start <= offset);
+        let Some(gutter) = at.checked_sub(1).map(|at| &self.gutters[at]) else {
             return offset;
         };
         let atom = gutter
             .item
             .as_ref()
             .is_some_and(|item| !item.marked && item.start < gutter.range.end);
-        // An atom's line is never the first: a marker line holds it.
-        if !atom || offset < gutter.range.start || offset >= gutter.range.end {
+        if !atom || offset >= gutter.range.end {
             return offset;
         }
+        // An atom's line is never the first: a marker line holds it.
         let edge = gutter.range.start - 1;
         match bias {
             Bias::Left => edge,

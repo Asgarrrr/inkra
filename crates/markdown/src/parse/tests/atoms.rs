@@ -59,7 +59,7 @@ fn an_atom_snaps_left_to_the_previous_lines_end_and_right_to_the_text_start() {
 
 #[test]
 fn a_marker_line_an_empty_item_part_and_a_bare_quote_are_no_atoms() {
-    for text in ["- a", "- [ ] a\n- b", "- a\nb", "> a\n> b"] {
+    for text in ["- a", "- [ ] a\n- b", "- a\nb", "> - a\n> b", "> a\n> b"] {
         for bias in [Bias::Left, Bias::Right] {
             assert_eq!(snapped(text, bias), expected(text, &[], bias), "{text:?}");
         }
