@@ -276,8 +276,8 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
     }
 
     /// The lines from the line start `from` to `to` that an item holds, where no item opens: a
-    /// code line hides its blanks before its code text, any other its blanks below the innermost
-    /// item's hang column. A blank line takes no item part, unless a code block holds it (D11).
+    /// code block's line hides its blanks before its fence or code text, any other its blanks below
+    /// the innermost item's hang column. A blank line takes no item part, unless a code block holds it (D11).
     /// Stops where no item holds the line.
     fn held_lines(&mut self, items: &Items, from: usize, to: usize) {
         let text = self.text;
@@ -305,9 +305,11 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
                 self.out.extend(quoted);
                 continue;
             }
-            let code = in_block.then(|| code_text(self.spans, line, end)).flatten();
-            let blanks = if let Some(code) = code {
-                bytes[start..code]
+            let block = in_block
+                .then(|| block_start(self.spans, line, end))
+                .flatten();
+            let blanks = if let Some(block) = block {
+                bytes[start..block]
                     .iter()
                     .take_while(|byte| is_blank(byte))
                     .count()
@@ -338,16 +340,14 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
     }
 }
 
-/// The first code text byte on the line from `line` to `end`: where pulldown-cmark starts a code
-/// block's line past the container's and the fence's indent (D11).
-fn code_text(spans: &[Span], line: usize, end: usize) -> Option<usize> {
+/// The first byte of the line from `line` to `end` that a code block styles, its fence or its code
+/// text: pulldown-cmark starts it past the container's indent and the fence's (D11).
+fn block_start(spans: &[Span], line: usize, end: usize) -> Option<usize> {
     let first = spans.partition_point(|span| span.range.end.get() <= line);
     spans[first..]
         .iter()
-        .take_while(|span| span.range.start.get() < end)
-        .find(|span| {
-            span.styles.contains(Styles::CODE_BLOCK) && !span.styles.contains(Styles::MARKER)
-        })
+        .take_while(|span| span.range.end.get() <= end)
+        .find(|span| span.styles.contains(Styles::CODE_BLOCK))
         .map(|span| span.range.start.get())
 }
 

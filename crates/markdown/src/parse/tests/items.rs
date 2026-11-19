@@ -235,8 +235,8 @@ fn a_code_blocks_lines_take_the_item_part_and_other_blank_lines_none() {
     assert_eq!(line_part("> - a\n>\n>   b", 1), None);
 }
 
-/// A code block's line hides its blanks up to its code text, where pulldown-cmark starts it past
-/// the container's and the fence's indent, however far the hang column lies (D11).
+/// A code block's line hides its blanks up to its fence or its code text, where pulldown-cmark
+/// starts it past the container's and the fence's indent, however far the hang column lies (D11).
 #[test]
 fn a_code_line_in_an_item_hides_its_blanks_up_to_its_code_text() {
     for (text, line, source, indent) in [
@@ -255,6 +255,7 @@ fn a_code_line_in_an_item_hides_its_blanks_up_to_its_code_text() {
         ("1. [ ] a\n   ```\n     x\n   ```", 2, "   ", 2),
         ("- - a\n\n  b\n\n  ```\n    x\n  ```", 5, "  ", 1),
         ("- a\n  ```\n\tx\n  ```", 2, "", 1),
+        ("- a\n\n     ```\n     x\n       y\n     ```", 2, "     ", 1),
         ("- a\n\n     ```\n     x\n       y\n     ```", 3, "     ", 1),
         ("- a\n\n     ```\n     x\n       y\n     ```", 4, "     ", 1),
         ("> - a\n>   ```\n>     x\n>   ```", 2, "  ", 1),
