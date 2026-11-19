@@ -283,6 +283,7 @@ fn an_html_line_in_an_item_hides_its_blanks_up_to_its_html() {
         ("- [ ] a\n\n  <div>\n      x\n  </div>", 3, "  "),
         ("- [ ] a\n\n  <div>\n      x\n  </div>", 4, "  "),
         ("- [ ] a\n\n   <div>\n   x", 2, "  "),
+        ("- [ ] a\n\n   <div>\n   x", 3, "  "),
         ("- a\n\n  <!--\n\n  -->", 3, ""),
     ] {
         assert_eq!(

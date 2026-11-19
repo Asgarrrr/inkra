@@ -50,7 +50,7 @@ pub(crate) struct Items {
     unboxed: Vec<Range<usize>>,
     /// Whether a code or an HTML block is open.
     in_leaf: bool,
-    /// Each text event of a code or an HTML block, in order (D11).
+    /// Each text event of a code or an HTML block inside a list, in order (D11).
     leaf_texts: Vec<LeafText>,
 }
 
@@ -107,7 +107,8 @@ impl Items {
         match event {
             Event::Start(Tag::CodeBlock(_) | Tag::HtmlBlock) => self.in_leaf = true,
             Event::End(TagEnd::CodeBlock | TagEnd::HtmlBlock) => self.in_leaf = false,
-            Event::Text(leaf) | Event::Html(leaf) if self.in_leaf => {
+            // Only a gutter item's line reads one, and only an open list holds a gutter item.
+            Event::Text(leaf) | Event::Html(leaf) if self.in_leaf && !self.open.is_empty() => {
                 self.leaf_texts.push(LeafText {
                     start: range.start,
                     leftover: if range.is_empty() { leaf.len() } else { 0 },
