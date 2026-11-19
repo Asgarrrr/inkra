@@ -126,7 +126,8 @@ fn parse_terminated(text: &str) -> Markdown {
                 open.pop();
             }
             Event::Text(_) | Event::Html(_) | Event::InlineHtml(_) => {
-                out.text(range, styles, current.as_ref());
+                out.markers_until(range.start, current.as_ref());
+                out.leaf(range, styles);
             }
             Event::Code(_) => {
                 let code = Open::code_span(&range, current.as_ref());
@@ -149,7 +150,7 @@ fn parse_terminated(text: &str) -> Markdown {
         .iter()
         .map(|(range, _)| range.start.get()..range.end.get());
     let (gutters, width_keys, mut bullets, unboxed) =
-        items.gutters(text, &quotes, structure.items(), blocks, &out.spans);
+        items.gutters(text, &quotes, structure.items(), blocks);
     cut(text, &mut out.spans, &gutters);
     let code_blocks = code_blocks
         .into_iter()
@@ -286,19 +287,6 @@ impl Out<'_> {
             replacement: "",
         });
         Some(marker)
-    }
-
-    /// A text event's bytes. A tab that a container splits gives the code its other columns as an
-    /// empty text right after it, so the tab is code text (task boxes spec, D11).
-    fn text(&mut self, range: Range<usize>, styles: Styles, current: Option<&Open>) {
-        let split = range.is_empty() && styles.contains(Styles::CODE_BLOCK);
-        debug_assert!(
-            !split || self.text.as_bytes()[range.start - 1] == b'\t',
-            "an empty code text not after a tab"
-        );
-        let start = range.start - usize::from(split);
-        self.markers_until(start, current);
-        self.leaf(start..range.end, styles);
     }
 
     fn leaf(&mut self, range: Range<usize>, styles: Styles) {

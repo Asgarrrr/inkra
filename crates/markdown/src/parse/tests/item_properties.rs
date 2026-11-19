@@ -162,22 +162,29 @@ fn held_lines_hold_an_item_part(text: &str) -> Result<(), TestCaseError> {
     Ok(())
 }
 
-/// No item part covers a byte of a code block's text or fences (D11).
-fn no_item_part_covers_code(text: &str) -> Result<(), TestCaseError> {
+/// No item part covers a byte of a code block's text or fences, or of an HTML block's (D11).
+fn no_item_part_covers_a_leafs_text(text: &str) -> Result<(), TestCaseError> {
     let markdown = parse(text);
-    let code: Vec<_> = markdown
+    let terminated = format!("{text}\n");
+    let html = Parser::new_ext(&terminated, options())
+        .into_offset_iter()
+        .filter(|(event, _)| matches!(event, Event::Html(_)))
+        .map(|(_, range)| range);
+    let leaves: Vec<_> = markdown
         .spans
         .iter()
         .filter(|span| span.styles.contains(Styles::CODE_BLOCK))
         .map(|span| span.range.start.get()..span.range.end.get())
+        .chain(html)
         .collect();
     for gutter in &markdown.gutters {
         let Some(item) = &gutter.item else { continue };
         let part = item.start.get()..gutter.range.end.get();
         prop_assert!(
-            code.iter()
-                .all(|span| span.end <= part.start || part.end <= span.start),
-            "item part {:?} covers code in {:?}",
+            leaves
+                .iter()
+                .all(|leaf| leaf.end <= part.start || part.end <= leaf.start),
+            "item part {:?} covers a leaf's text in {:?}",
             part,
             text
         );
@@ -185,17 +192,23 @@ fn no_item_part_covers_code(text: &str) -> Result<(), TestCaseError> {
     Ok(())
 }
 
-/// Items holding code blocks: markers, blanks and tabs that indent a fence or a code line.
+/// Items holding code and HTML blocks: markers, quotes, blanks and tabs that indent a fence, a
+/// code line or an HTML line. Each property here also checks that `parse` never panics on them.
 fn item_code_fragment() -> impl Strategy<Value = String> {
     prop_oneof![
         Just("- ".to_string()),
         Just("- [ ] ".to_string()),
         Just("1. [ ] ".to_string()),
+        Just("2) ".to_string()),
         Just("> ".to_string()),
+        Just(">".to_string()),
         Just(" ".to_string()),
         Just("  ".to_string()),
         Just("\t".to_string()),
         Just("```\n".to_string()),
+        Just("```".to_string()),
+        Just("~~~".to_string()),
+        Just("<div>".to_string()),
         Just("x".to_string()),
         Just("\n".to_string()),
     ]
@@ -203,10 +216,10 @@ fn item_code_fragment() -> impl Strategy<Value = String> {
 
 proptest! {
     #[test]
-    fn no_item_part_covers_code_in_items_holding_code(
+    fn no_item_part_covers_a_leafs_text_in_items_holding_code(
         fragments in prop::collection::vec(item_code_fragment(), 0..40)
     ) {
-        no_item_part_covers_code(&fragments.concat())?;
+        no_item_part_covers_a_leafs_text(&fragments.concat())?;
     }
 
     #[test]

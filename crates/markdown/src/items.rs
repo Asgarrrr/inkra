@@ -7,9 +7,9 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Tag, TagEnd};
 
+use crate::Conceal;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
 use crate::spans::{line_start, to_offsets};
-use crate::{Conceal, Span, Styles};
 
 /// A gutter item as the parse met it.
 struct Record {
@@ -48,6 +48,21 @@ pub(crate) struct Items {
     bullets: Vec<Conceal>,
     /// Each line holding a task with no box, in line order, without its `\n`.
     unboxed: Vec<Range<usize>>,
+    /// The furthest end of a gutter item opened so far: no gutter item holds a line past it.
+    held_until: usize,
+    /// Whether a code or an HTML block is open.
+    in_leaf: bool,
+    /// Each text event of a code or an HTML block a gutter item holds, in order (D11).
+    leaf_texts: Vec<LeafText>,
+}
+
+/// A text event of a code or an HTML block: pulldown-cmark emits one or two per line, the first
+/// an empty one when the line's containers leave columns to the text, a tab's or the block's own
+/// indent (D11).
+struct LeafText {
+    start: usize,
+    /// The columns before `start` that belong to the text.
+    leftover: usize,
 }
 
 impl Items {
@@ -93,6 +108,16 @@ impl Items {
             }
         }
         match event {
+            Event::Start(Tag::CodeBlock(_) | Tag::HtmlBlock) => self.in_leaf = true,
+            Event::End(TagEnd::CodeBlock | TagEnd::HtmlBlock) => self.in_leaf = false,
+            Event::Text(leaf) | Event::Html(leaf)
+                if self.in_leaf && range.start < self.held_until =>
+            {
+                self.leaf_texts.push(LeafText {
+                    start: range.start,
+                    leftover: if range.is_empty() { leaf.len() } else { 0 },
+                });
+            }
             Event::Start(Tag::List(first)) => {
                 self.open.push(first.map(|_| self.numbers.len()));
                 if first.is_some() {
@@ -118,6 +143,7 @@ impl Items {
                     key.delimiter = text.as_bytes()[end];
                 }
                 let record = gutter.then(|| {
+                    self.held_until = self.held_until.max(range.end);
                     self.records.push(Record {
                         end: range.end,
                         marker: self.count,
@@ -141,20 +167,19 @@ impl Items {
     /// The gutters, each held line's item part after its quote part, the width keys their item
     /// parts index, the bullets' conceals, and the lines holding a task with no box. `quotes` are
     /// the leading quotes' ranges, `items` every item's marker and `blocks` every code block's
-    /// range without its last `\n`, all in document order; `spans` are the parse's. One walk, after
-    /// the parse's one pass, so every width key is final (D1).
+    /// range without its last `\n`, all in document order. One walk, after the parse's one pass,
+    /// so every width key is final (D1).
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
         items: &[ByteOffset],
         blocks: impl Iterator<Item = Range<usize>>,
-        spans: &[Span],
     ) -> (Vec<Gutter>, Vec<WidthKey>, Vec<Conceal>, Vec<Range<usize>>) {
         let quote_lines = quote_gutters(text, quotes);
         let mut walk = Walk {
             text,
-            spans,
+            leaf_texts: self.leaf_texts.iter().peekable(),
             out: Vec::with_capacity(quote_lines.len() + self.records.len()),
             quote_lines: quote_lines.into_iter().peekable(),
             blocks: blocks.peekable(),
@@ -244,12 +269,12 @@ struct Held<'r> {
     hang: usize,
 }
 
-/// The walk's cursors, each moving forward only: the quote lines not yet given out, the code
-/// blocks not yet passed, the gutter items holding the line, outermost first, and the gutters and
-/// width keys so far.
+/// The walk's cursors, each moving forward only: the quote lines not yet given out, the leaf texts
+/// and the code blocks not yet passed, the gutter items holding the line, outermost first, and the
+/// gutters and width keys so far.
 struct Walk<'t, 'r, B: Iterator<Item = Range<usize>>> {
     text: &'t str,
-    spans: &'t [Span],
+    leaf_texts: Peekable<std::slice::Iter<'r, LeafText>>,
     quote_lines: Peekable<std::vec::IntoIter<Gutter>>,
     blocks: Peekable<B>,
     held: Vec<Held<'r>>,
@@ -275,10 +300,11 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
             .next_if(|gutter| gutter.range.start.get() == line)
     }
 
-    /// The lines from the line start `from` to `to` that an item holds, where no item opens: a
-    /// code block's line hides its blanks before its fence or code text, any other its blanks below
-    /// the innermost item's hang column. A blank line takes no item part, unless a code block holds it (D11).
-    /// Stops where no item holds the line.
+    /// The lines from the line start `from` to `to` that an item holds, where no item opens. A
+    /// line's item part hides its blanks before its leaf's text, where pulldown-cmark starts it: a
+    /// fence at its first byte, a code or an HTML line its leftover columns before its first text
+    /// event. Any other line hides its blanks below the innermost item's hang column, and takes no
+    /// item part when blank (D11). Stops where no item holds the line.
     fn held_lines(&mut self, items: &Items, from: usize, to: usize) {
         let text = self.text;
         let bytes = text.as_bytes();
@@ -299,32 +325,28 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
             let start = quoted
                 .as_ref()
                 .map_or(line, |gutter| gutter.range.end.get());
-            let is_blank = |byte: &u8| matches!(byte, b' ' | b'\t');
-            let in_block = self.in_block(line, end);
-            if bytes[start..end].iter().all(is_blank) && !in_block {
+            let is_blank = |byte: u8| matches!(byte, b' ' | b'\t');
+            let leaf = self
+                .leaf_text(line, end)
+                .map(|leaf| column_after(0, &bytes[line..leaf.start]) - leaf.leftover);
+            let fence = leaf.is_none() && self.in_block(line, end);
+            if leaf.is_none() && !fence && bytes[start..end].iter().all(|&byte| is_blank(byte)) {
                 self.out.extend(quoted);
                 continue;
             }
-            let block = in_block
-                .then(|| block_start(self.spans, line, end))
-                .flatten();
-            let blanks = if let Some(block) = block {
-                bytes[start..block]
-                    .iter()
-                    .take_while(|byte| is_blank(byte))
-                    .count()
-            } else {
-                let column = column_after(0, &bytes[line..start]);
-                bytes[start..end]
-                    .iter()
-                    .scan(column, |column, byte| {
-                        let at = *column;
-                        *column = column_after(at, &[*byte]);
-                        Some((at, byte))
-                    })
-                    .take_while(|&(at, byte)| at < hang && is_blank(byte))
-                    .count()
+            let hides = |at: usize, after: usize| match leaf {
+                Some(text) => after <= text,
+                None => fence || at < hang,
             };
+            let blanks = bytes[start..end]
+                .iter()
+                .scan(column_after(0, &bytes[line..start]), |column, &byte| {
+                    let at = *column;
+                    *column = column_after(at, &[byte]);
+                    Some((at, *column, byte))
+                })
+                .take_while(|&(at, after, byte)| is_blank(byte) && hides(at, after))
+                .count();
             let mut gutter = quoted.unwrap_or_else(|| gutter_at(line, 0));
             gutter.item =
                 Some(items.item_part(ByteOffset::new(start), &self.held, &[], &mut self.keys));
@@ -333,22 +355,18 @@ impl<B: Iterator<Item = Range<usize>>> Walk<'_, '_, B> {
         }
     }
 
+    /// The first text event of a code or an HTML block on the line from `line` to `end`; lines come
+    /// in order.
+    fn leaf_text(&mut self, line: usize, end: usize) -> Option<&LeafText> {
+        while self.leaf_texts.next_if(|leaf| leaf.start < line).is_some() {}
+        self.leaf_texts.next_if(|leaf| leaf.start <= end)
+    }
+
     /// Whether a code block holds the line from `line` to `end`; lines come in order.
     fn in_block(&mut self, line: usize, end: usize) -> bool {
         while self.blocks.next_if(|block| block.end < line).is_some() {}
         self.blocks.peek().is_some_and(|block| block.start <= end)
     }
-}
-
-/// The first byte of the line from `line` to `end` that a code block styles, its fence or its code
-/// text: pulldown-cmark starts it past the container's indent and the fence's (D11).
-fn block_start(spans: &[Span], line: usize, end: usize) -> Option<usize> {
-    let first = spans.partition_point(|span| span.range.end.get() <= line);
-    spans[first..]
-        .iter()
-        .take_while(|span| span.range.end.get() <= end)
-        .find(|span| span.styles.contains(Styles::CODE_BLOCK))
-        .map(|span| span.range.start.get())
 }
 
 /// An item's marker: pulldown-cmark starts its range up to a tab's leftover columns early, back

@@ -182,3 +182,20 @@ fn the_shape_changes_with_the_language_or_the_content_lines() {
         assert_ne!(shape(one), shape(other), "{one:?}");
     }
 }
+
+/// pulldown-cmark gives the code the columns left of a tab its containers split, as an empty text
+/// past the `>` here: the `>` stays a quote marker (task boxes spec, D11).
+#[test]
+fn a_quote_marker_before_a_codes_leftover_columns_stays_a_marker() {
+    for text in ["- >```\n\t\t>", "2) >~~~\n\t\t>"] {
+        let quote = text.rfind('>').unwrap();
+        let spans = parse(text).spans;
+        let span = spans
+            .iter()
+            .find(|span| span.range.start.get() <= quote && quote < span.range.end.get());
+        assert!(
+            span.is_some_and(|span| span.styles.contains(M) && !span.styles.contains(B)),
+            "{text:?}: {span:?}"
+        );
+    }
+}

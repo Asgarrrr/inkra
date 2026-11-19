@@ -260,10 +260,29 @@ fn a_code_line_in_an_item_hides_its_blanks_up_to_its_code_text() {
         ("- a\n\n     ```\n     x\n       y\n     ```", 4, "     ", 1),
         ("> - a\n>   ```\n>     x\n>   ```", 2, "  ", 1),
         ("- a\n  > -     x", 1, "  ", 1),
+        ("- a\n\n\t\tx\n\t\ty", 2, "\t", 1),
+        ("- a\n\n\t\tx\n\t\ty", 3, "\t", 1),
     ] {
         assert_eq!(
             line_part(text, line),
             Some(expect(source, indent, &[], false)),
+            "{text:?} line {line}"
+        );
+    }
+}
+
+/// An HTML block's line hides its blanks up to its HTML, its own indent kept (D11).
+#[test]
+fn an_html_line_in_an_item_hides_its_blanks_up_to_its_html() {
+    for (text, line, source) in [
+        ("- [ ] a\n\n  <div>\n      x\n  </div>", 2, "  "),
+        ("- [ ] a\n\n  <div>\n      x\n  </div>", 3, "  "),
+        ("- [ ] a\n\n  <div>\n      x\n  </div>", 4, "  "),
+        ("- [ ] a\n\n   <div>\n   x", 2, "  "),
+    ] {
+        assert_eq!(
+            line_part(text, line),
+            Some(expect(source, 1, &[], false)),
             "{text:?} line {line}"
         );
     }
