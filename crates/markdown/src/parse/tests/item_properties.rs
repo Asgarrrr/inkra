@@ -163,7 +163,7 @@ fn held_lines_hold_an_item_part(text: &str) -> Result<(), TestCaseError> {
 }
 
 /// No item part covers a byte of a code block's text or fences, or of an HTML block's (D11).
-fn no_item_part_covers_a_leafs_text(text: &str) -> Result<(), TestCaseError> {
+fn no_item_part_covers_leaf_text(text: &str) -> Result<(), TestCaseError> {
     let markdown = parse(text);
     let terminated = format!("{text}\n");
     let html = Parser::new_ext(&terminated, options())
@@ -216,10 +216,10 @@ fn item_code_fragment() -> impl Strategy<Value = String> {
 
 proptest! {
     #[test]
-    fn no_item_part_covers_a_leafs_text_in_items_holding_code(
+    fn no_item_part_covers_leaf_text_in_items_holding_code(
         fragments in prop::collection::vec(item_code_fragment(), 0..40)
     ) {
-        no_item_part_covers_a_leafs_text(&fragments.concat())?;
+        no_item_part_covers_leaf_text(&fragments.concat())?;
     }
 
     #[test]
