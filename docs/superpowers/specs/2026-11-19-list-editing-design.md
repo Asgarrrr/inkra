@@ -307,6 +307,10 @@ First match wins.
    container prefix: `> a|` gives `> a\n> |`. An empty quote line, blanks only past its quote part,
    loses its innermost `>` and the blank after it instead: `> > |` gives `> |`, and `> |` gives an
    empty line, so the quote ends. The caret lands at the line's new end.
+   - On a lazy quote line, which shows fewer `>` than its `Gutter::depth`, the new line takes
+     `Gutter::depth` quotes, their `>`s copied from the nearest line above that shows them all, as
+     the container prefix takes them: `> a\nb|` gives `> a\nb\n> |`. A lazy line is never empty,
+     so the exit does not apply to it.
 9. **A caret before the text start** of a marker line, in a revealed item part, takes the plain key.
    `|- a` moves the item down a line, as in Zed (case 8).
 10. **A line holding an opener past its text start** takes the plain key. In `- > - a` the inner
@@ -420,7 +424,9 @@ per press, first match wins:
    and the `\n` before the line, so the caret lands at the previous line's end. The item's held
    lines, children included, stay in place and now belong to the item above: its previous sibling,
    else its parent. They take the width shift to that item's content column (D7), so they stay
-   held. So `↩` then `⌫` restores the text and the caret, whether `↩` continued a plain item or one
+   held. An ordered child list that starts past `1` renumbers from `1`, as D4 does for adopted
+   siblings, since it cannot interrupt the new holder's paragraph: `- a\n- |\n  3. c` gives
+   `- a|\n  1. c`. So `↩` then `⌫` restores the text and the caret, whether `↩` continued a plain item or one
    with children (P1): `- a\n- |\n  - c` gives `- a|\n  - c`. On a note's first line, only the item
    part goes, and its held lines take no shift. A quoted empty item keeps its quote part:
    `> - a\n> - |` gives `> - a|`.
@@ -440,14 +446,15 @@ editor does not bind it a second time. `InputHost` gains one method beside `snap
 
 ```rust
 /// The edit `⌫` makes instead of deleting a grapheme, as the text was last parsed.
-fn backspace_markup(&self, cx: &App) -> Option<Diff> {
+fn backspace_markup(&self, cx: &App) -> Option<(Version, ListEdit)> {
     None
 }
 ```
 
-The shared handler applies the `Diff` through `apply_diff` when one comes back, else calls
-`EditorState::backspace` as today. `EditorView`'s returns `remove_markup`'s hunks as a `Diff` at
-`parsed_at` (D9). `NameField` takes the default. The trait already has two implementers, so this
+The shared handler applies the hunks as a `Diff` at the returned version through `apply_diff`, then
+places the `ListEdit`'s caret as D9 does, with `no_snap`. With `None` it calls
+`EditorState::backspace` as today. `EditorView`'s returns `parsed_at` and `remove_markup`'s
+`ListEdit` (D9). `NameField` takes the default. The trait already has two implementers, so this
 adds no trait with one.
 
 **Delete and `⌘⌫`** are out of scope (Deferred). `⌘⌫` has no editor binding (`keymap.rs:72` is the
@@ -533,7 +540,10 @@ write the new marker line after blank lines, below the caret. `⇥` and `⇧⇥`
 - `newline` (`actions.rs:138-141`): with an empty selection and no marked text, it calls
   `continue_list` on `EditorView::markdown`. The hunks become a `Diff` at `parsed_at`. Inside one
   `edit_buffer`, `apply_diff` applies it and, when it lands, `EditorState::move_to` collapses the
-  selection at `caret` (`state.rs:220-229`). `None` inserts `\n` through `EditorState::insert`, so a
+  selection at `caret` (`state.rs:220-229`). It passes `inkra_editor::no_snap`: the snap of the
+  parse before the edit would read the new offsets against old atoms, so `- a\n  b |\n  c` with `↩`
+  would land at 13. `refresh`'s `snap_selection` snaps the caret against the new parse, as it does
+  for marked text (task boxes spec, D2). `None` inserts `\n` through `EditorState::insert`, so a
   plain `↩` still merges with typing.
 - `indent_item` and `outdent_item`: the same shape, with D4's fallbacks.
 - **A stale parse.** When `parsed_at` is not the buffer's version, `apply_diff` returns false and
@@ -625,8 +635,12 @@ the indent, held lines, lazy lines and code blocks in items, nesting up to four:
   one level, and rule 2 or 8 adds no item. Every other item keeps its depth, its
   list and its order, and every quote still opens. The test parses; the command does not.
 - **P1.** At a marker line's end with text, children and blank lines below included,
-  `continue_list` then `remove_markup` restores the text. It restores the caret too, except when
-  rule 6 wrote the marker line after blank lines: the caret then ends on the last blank line.
+  `continue_list` then `remove_markup` restores the text up to the laziness of the lines `↩` moved.
+  `↩` writes the container prefix before a moved lazy line, by design (D2, rule 6), and `⌫` keeps
+  it: `- a|\nb` gives `- a\n  b` back. The generator keeps lazy lines; for them P1 compares the
+  text with each moved lazy line's prefix stripped, and P0 still checks the parse's structure. P1
+  restores the caret too, except when rule 6 wrote the marker line after blank lines: the caret then
+  ends on the last blank line.
 - **P5, the container prefix.** Every `\n` a command inserts is followed by the container prefix of
   its line, and the parse of the result puts that line in the same quotes and items as the command
   meant.
@@ -646,6 +660,8 @@ the indent, held lines, lazy lines and code blocks in items, nesting up to four:
 - `cmd-z` after each restores the text in one step, and puts the caret where D9's table says: one
   test per row, rule 7, D3 nested and rule 2 at the text start included.
 - A command on a stale parse, made by a write that skips `refresh`, edits nothing.
+- The caret of a `ListEdit` snaps against the new parse: `- a\n  b |\n  c` with `enter` lands at
+  the new line's text start, not at 13. `backspace` on `- a\n- |\n  3. c` gives `- a|\n  1. c`.
 - `keymap/tests.rs` passes: `tab` and `shift-tab` are bound in the editor context alone.
 
 After L1 and L2, render the `markdown-lists` scene with a continued and a nested item, and look at it.
@@ -702,6 +718,11 @@ markdown mutants on the diff (CLAUDE.md, Commands).
   - D9's caret after `⌘Z` was wrong for rule 7, D3 nested and rule 2 at the text start: a table
     per case, each tested. `ListEdit` makes the caret after a command explicit.
   - Rule 8 could end quoted code: a line in a code block never leaves its quote (D2, rules 2 and 8).
+- 2026-11-19: a final review of `5d3f0d62` found that a `ListEdit`'s caret snapped with the old
+  parse (now `no_snap`, then `refresh`, D9), that P1 failed on lazy lines (exception stated, P1),
+  that `backspace_markup` returned a `Diff` (now a `ListEdit`, D5), that `⌫` left an ordered child
+  list starting past `1` as text (renumbered, D5 rule 1), and that rule 8 had no source for a lazy
+  line's `>`s (`Gutter::depth`, D2 rule 8).
 
 ## Deviations
 
