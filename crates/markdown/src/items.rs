@@ -143,9 +143,9 @@ impl Items {
         while let Some(first) = rest.first() {
             let marker = items[first.marker].get();
             let line = line_start(text, marker);
-            let line_end = text[line..].find('\n').map_or(text.len(), |len| line + len);
+            let on_line = |item: &&Record| line_start(text, items[item.marker].get()) == line;
             // `first` opens on the line, so `opening` holds at least it.
-            let count = 1 + rest[1..].partition_point(|item| items[item.marker].get() < line_end);
+            let count = 1 + rest[1..].iter().take_while(on_line).count();
             let (opening, after) = rest.split_at(count);
             let last = &opening[count - 1];
             rest = after;
