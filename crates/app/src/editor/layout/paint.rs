@@ -266,9 +266,8 @@ impl DocumentLayout {
                     }
                 }
                 Paint::Box { checked } => {
-                    if let Some((square, _)) = line.task_box() {
-                        self.paint_task_box(square + origin, *checked, window, cx);
-                    }
+                    let square = line.box_square(mark.x) + origin;
+                    self.paint_task_box(square, *checked, window, cx);
                 }
             }
         }

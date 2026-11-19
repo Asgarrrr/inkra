@@ -108,9 +108,13 @@ impl LineLayout {
         let Paint::Box { checked } = mark.paint else {
             return None;
         };
+        Some((self.box_square(mark.x), checked))
+    }
+
+    /// The box's square at `x`, centred on row 0.
+    pub(super) fn box_square(&self, x: Pixels) -> Bounds<Pixels> {
         let top = (self.row_height - TASK_BOX_SIZE) / 2.;
-        let square = Bounds::new(point(mark.x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE));
-        Some((square, checked))
+        Bounds::new(point(x, top), size(TASK_BOX_SIZE, TASK_BOX_SIZE))
     }
 }
 
