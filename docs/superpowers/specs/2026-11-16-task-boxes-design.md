@@ -6,7 +6,8 @@ questions 5 and 6. In the real font, T6b as built glued a task's text to its box
 moved bullets into the box's slot (decision 7). T6c is designed, and the owner decided its Open
 questions 7 and 8 on 2026-11-18/19. Open question 9 waits on the rendered scene. Open question 10
 was decided before T6c1 started, and T6c2 took its fallback. T6c1 and T6c2 are built, and the
-cross-slice review's fixes are in (History). This spec replaces S3 of
+cross-slice review's fixes are in (History). The owner made hidden blanks an atom on 2026-11-19
+and decided its Open question 11 the same day (D2). This spec replaces S3 of
 `2026-09-30-markdown-blocks-design.md` ("S3 as planned", 2026-11-11), whose parser facts and
 pending-slot rule it cites rather than copies. An audit and an advisor review (Opus) of that plan
 found the defects this spec fixes; they are cited by letter (A–I). D1–D11 state the design as it
@@ -60,8 +61,9 @@ By the owner, on 2026-11-16 unless dated.
   leading blanks: below the hang column, or before the leaf text start on a code or HTML block's
   line (D11). It never covers a byte of a code or HTML block's text. It is hidden in both states.
 - **leaf text start**: the column where pulldown-cmark starts a code or HTML block line's text:
-  the column of its first text event, less the leftover columns that event carries (D11). A fence
-  line has no text event.
+  the column of its first text event, less the leftover columns that event carries (D11). A fence,
+  a fence after a `>` that opens on its line, and an empty line merged into the previous event have
+  no text event.
 - **slot**: an area `TASK_BOX_SIZE + LIST_SLOT_GAP` wide, the standard slot. A number's slot takes
   its list's number width instead, never narrower than the standard slot (D3). An item part is a
   row of slots.
@@ -72,6 +74,7 @@ By the owner, on 2026-11-16 unless dated.
 - **box**: the square painted in a task's slot.
 - **hang column**: the column after the marker line's item part, counted from the line's start by
   `column_after` (D11).
+- **atom**: an item part with no mark that holds a blank. No caret rests inside it (D2).
 - **text start**: the first byte past the line's item part. For a task, that is the byte after the
   checkbox and its one space or tab. For an item with no text, it is the line's end.
 - **opener**: a list item or a block quote that opens in the text, at its byte: an item's marker, a
@@ -128,9 +131,9 @@ pub enum ItemMarker {
   holds it and the line is not blank, or when it is a blank line inside a code block that a gutter
   item holds (D11).
 - **The range.** `range` runs through the quote part, then the item part. `Gutter::quote_end`
-  (`gutters.rs:64-66`) returns `item.start`, or `range.end` when the line has no item part.
+  (`gutters.rs:66-68`) returns `item.start`, or `range.end` when the line has no item part.
 - **The marks.** `ItemPart::marks(&self, part: &str) -> impl Iterator<Item = ItemMarker>`
-  (`gutters.rs:73-101`) yields a marker line's marks in slot order, before the box. `part` is the
+  (`gutters.rs:75-103`) yields a marker line's marks in slot order, before the box. `part` is the
   item part's text, from `start` to the gutter's end. The marks are the item part's non-blank runs
   before the checkbox: a run that starts with a digit is a number, any other a bullet. A task's own
   bullet, the last run before its checkbox, is dropped, because the box takes its slot (D10). An
@@ -159,15 +162,15 @@ pub enum ItemMarker {
     empty event carries (D11).
 - **The walk.**
   - After the parse's one pass, one walk over the lines builds every gutter. It builds the quote
-    part with `gutter` (`gutters.rs:174-195`), then the item part (D11).
+    part with `gutter` (`gutters.rs:204-225`), then the item part (D11).
   - It appends each holding list's width key to `Markdown::width_keys`, one vector for the whole
     note, and `keys` holds their range. The pass has ended, so every key is final, and no line
     is back-filled.
   - The walk visits only lines inside a leading quote or a gutter item. It jumps from one container
     to the next.
-  - The walk is `Items::gutters` (`items.rs:165-231`). It returns an `ItemGutters`
-    (`items.rs:261-270`). It takes the quote lines from `quote_gutters` (`gutters.rs:135-158`) and
-    adds the item part with `item_part` (`items.rs:235-257`). A line's items are the records whose
+  - The walk is `Items::gutters` (`items.rs:166-232`). It returns an `ItemGutters`
+    (`items.rs:263-272`). It takes the quote lines from `quote_gutters` (`gutters.rs:165-188`) and
+    adds the item part with `item_part` (`items.rs:236-259`). A line's items are the records whose
     marker stands on it, by `line_start`.
   - Between two marker lines, `Walk::held_lines` (`crates/markdown/src/items/walk.rs:56-101`)
     visits each line that the held items hold, and stops at the first line that none holds. `Held`
@@ -176,7 +179,7 @@ pub enum ItemMarker {
     (`walk.rs:111-114`) tells a fence or a blank line inside a code block from any other line. Each
     reads its records in order, so the walk passes each once.
 - **The quote part counts columns.** `gutter` counts the blanks before each `>` in columns, as
-  `LineStart` does (`Blanks`, `gutters.rs:199-233`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
+  `LineStart` does (`Blanks`, `gutters.rs:229-263`; `pulldown-cmark-0.13.6/src/scanners.rs:160-187`;
   `pulldown-cmark-0.13.6/src/firstpass.rs:109-114`).
   - A tab stops at the next multiple of 4 from the line's start.
   - The one blank after a `>` takes one column. When it is a tab, the tab's other columns count
@@ -195,7 +198,7 @@ pub enum ItemMarker {
   task with no text, as `- [ ]\n` is. No output reaches the added byte: no span or marker holds a
   `\n`, and every range ends before its line ending. A proptest pins it over every offset
   `Markdown` holds (`parse/tests/last_line.rs`).
-- **One lookup.** `Markdown::task_at(line_start) -> Option<&Task>` (`gutters.rs:107-118`) returns
+- **One lookup.** `Markdown::task_at(line_start) -> Option<&Task>` (`gutters.rs:109-120`) returns
   `gutter.item?.task` for the gutter that starts at the line's start. It finds that gutter by binary search over `gutters`.
   `cycle.rs`, `DocumentLayout::task_at` and the tests call it.
 - **(A) Change detection.** `Gutter::same` (`crates/markdown/src/changed.rs:169-198`) compares the
@@ -287,12 +290,13 @@ tab at 173-181).
 ## D2. The conceal
 
 **(B)** An item part with a mark has one conceal, the item conceal (`gutter_conceals`,
-`gutters.rs:239-265`).
+`gutters.rs:269-295`).
 
 - Its element and its marker run from the item part's start through the end of its last mark: a
   bullet, a number's `.` or `)`, or a checkbox's `]`.
 - An item part with no mark emits no conceal: blanks show nothing to reveal. That covers every line
-  but a marker line, and an empty item part, as on line 2 of `- a\nb`. A marker is never empty
+  but a marker line, and an empty item part, as on line 2 of `- a\nb`. `ItemPart::marked` says
+  which: the walk sets it on a marker line alone. A marker is never empty
   (`crates/markdown/src/parse.rs:19`).
 - The replacement is `""`.
 - Why: with the checkbox alone as the element, `⌃A` on `- [ ] a` put the caret at 0 and revealed
@@ -305,14 +309,13 @@ Behaviour:
 - On a marker line, the text start lies one byte past the element's end. So a caret there does not
   reveal, just as a caret at a bullet's text never revealed its `•` (live-preview D2). After a click
   on a box, the box stays painted.
-- An item part with no mark never reveals, so it never widens. A caret in its blanks or at its text
-  start keeps the line's `x`.
-- Home goes to the line's start (`to_row_edge`, `crates/app/src/text_input/actions.rs:84-103`). On
-  a marker line it reveals the item part, as it revealed a bullet. On any other line it lands
-  before the hidden blanks and reveals nothing: the caret paints at the text's `x`, and a letter
-  typed there lands before the blanks.
+- An item part with no mark never reveals, so it never widens. A caret at its text start keeps the
+  line's `x`, and none rests in its blanks (the atom, below).
+- Home goes to the row's start (`to_row_edge`, `crates/app/src/text_input/actions.rs:90-109`). On
+  a marker line it reveals the item part, as it revealed a bullet. On any other line it lands at
+  the text start, past the atom (below), and reveals nothing.
 - A gutter item's bullet has no `•` conceal, because its slot paints it. Any other item's bullet
-  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:300-309`).
+  keeps its conceal (`bullet`, `crates/markdown/src/items.rs:302-311`).
 - The quote part and the item part reveal apart (markdown-blocks S1 review). In `> - a`, a caret on
   `>` reveals the quote part only.
 - The marker equals the element, because no other conceal starts in an item part. An item part
@@ -324,8 +327,9 @@ gutter's own conceals: its quotes, then one for its item part when that part has
 G-property in `parse/tests/gutters.rs` checks the same count, and that a part with no mark has no
 conceal.
 
-**Amendment draft: hidden blanks are an atom** (2026-11-19, the owner's decision after the review
-of c217357e; design only, awaiting the owner's go). It replaces the Home bullet above.
+**Hidden blanks are an atom** (2026-11-19, the owner's decision after the review of c217357e; Open
+question 11 decided the same day). Before it, Home on a held line landed before the hidden blanks,
+and a letter typed there landed before them too.
 
 The rule. An item part with no mark that holds at least one blank is an **atom**: no caret rests
 inside it, and a caret move or a deletion steps over it whole. Its edges are the previous line's
@@ -338,42 +342,54 @@ blank: on `- a\n  b`, offsets 4 and 5 are inside, and 3 and 6 are its edges.
   at the previous line's end does the same.
 - Home, `⌃A`, a click, a drag, Up and Down land at the text start.
 - On a quoted line, the inside also covers the quote part: `> - a\n>   b` joins to `> - ab`. A caret
-  at the quote part's end paints at the text start's `x` too, so it would rest unseen. This is
-  open: the owner's words name the item part only (Open question 11).
+  at the quote part's end paints at the text start's `x` too, so it would rest unseen (Open
+  question 11, decided).
 - The atom covers the item part of every held line with no mark: a paragraph's later lines, a lazy
   line with blanks, and a code or HTML block's lines, whose hidden blanks end at the leaf text
   start (D11). An empty item part, as on line 2 of `- a\nb`, is no atom.
 
-The data. `Markdown::snap(offset, bias) -> ByteOffset` in `gutters.rs`, beside `gutter_conceals`.
-It returns `offset` outside every atom. Inside one, it returns the atom's start edge for
-`Bias::Left` and its text start for `Bias::Right`. It finds the gutter by one binary search, as
-`Markdown::task_at` does, and builds no vector. One predicate decides both "this item part has a
-mark", for the conceal, and "this item part is an atom". So the two can never disagree.
+The data. `Markdown::snap(offset, bias) -> ByteOffset` (`gutters.rs:121-148`), beside
+`Markdown::task_at`. It returns `offset` outside every atom. Inside one, it returns the atom's start
+edge for `Bias::Left` and its text start for `Bias::Right`. It finds the gutter by one binary
+search, as `Markdown::task_at` does, and builds no vector.
+
+One predicate decides both "this item part has a mark", for the conceal, and "this item part is an
+atom": `ItemPart::marked` (`gutters.rs:35-36`). `item_part` sets it on a marker line alone
+(`items.rs:236-259`), because a marker is never empty. `gutter_conceals` emits the item conceal only
+when it is set, and `snap` takes a part without it that holds a blank as an atom. So the two can
+never disagree. The conceal first trimmed the part's text instead, but `Markdown` holds no text, and
+an `edit_buffer` closure holds the buffer mutably, so it could not lend the text to the snap.
 
 The seam. `inkra-editor` reads no markdown, so it takes the snap as a function. `EditorState`'s
-moves and deletions take `snap: impl Fn(ByteOffset, Bias) -> ByteOffset`. `InputHost` passes it
-to the closures of `move_cursor` and `edit_buffer`. `EditorView`'s comes from its current parse;
-`NameField`'s is the identity. No trait is added: a function has one shape, and `NameField` needs
-no type to say "no atoms".
+moves and deletions take `snap: impl Fn(ByteOffset, Bias) -> ByteOffset`.
+`InputHost::snap` (`crates/app/src/text_input.rs:194-195`) hands out an owned closure, and each
+action captures it in its `move_cursor` or `edit_buffer` closure. So the gates keep their shape,
+and an action that needs no snap (typing, cut, undo, `⌘A`) does not name one. `EditorView`'s
+clones its parse's `Rc` (`crates/app/src/editor/mod.rs:407-410`); `NameField`'s is
+`inkra_editor::no_snap`, the identity. No trait is added: a function has one shape, and
+`NameField` needs no type to say "no atoms".
 
 The invariant, "no caret rests inside an atom". One function, `Markdown::snap`, enforces it at two
 moments. Each moment exists for a reason the other cannot cover:
 
-- **When the selection moves.** `EditorState::place` (`crates/editor/src/state.rs:263-270`), which
-  every move reaches, snaps the head with the action's bias. The action chooses the bias, not the
-  direction of the move: Home moves left but lands at the text start.
+- **When the selection moves.** `EditorState::place` (`crates/editor/src/state.rs:307-322`), which
+  every move reaches, snaps the head with the action's bias, then clips it. The action chooses the
+  bias, not the direction of the move: Home moves left but lands at the text start.
   - `Bias::Left`: Left, `⇧←`, and Backspace's range start.
   - `Bias::Right`: Right, `⇧→`, Delete's range end, Home, `⌃A`, Up, Down, `⇧↑`, `⇧↓`, a click, a
     drag, and `select_range`.
   - End, `⌃E`, `⌘↑` and `⌘↓` never land inside an atom, which ends at a line's text start. They
     snap anyway, so no action needs a proof.
-  - `EditorState::remove` (`state.rs:212-226`) builds its range from the snapped grapheme step. So
+  - `EditorState::remove` (`state.rs:231-251`) builds its range from the snapped grapheme step. So
     Backspace and Delete remove the atom whole.
-- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:134-158`) is the
-  one place where the parse changes. After it takes a new parse, it snaps the selection: a caret
-  with `Bias::Right`, a range's start with `Bias::Left` and its end with `Bias::Right`. An edit
-  places its caret before the new text is parsed, so `place` cannot see the new atoms. This covers
-  typing, paste, undo, redo, a reload, a write from outside, and a pinned selection's reset.
+  - `move_` picks `Bias::Left` for `Left` alone; `move_to` and `move_vertically` pick
+    `Bias::Right`.
+- **When the text changes.** `EditorView::refresh` (`crates/app/src/editor/mod.rs:134-161`) is the
+  one place where the parse changes. After it takes a new parse, it snaps the selection through
+  `EditorState::snap` (`state.rs:324-337`): a caret with `Bias::Right`, a range's start with
+  `Bias::Left` and its end with `Bias::Right`. An edit places its caret before the new text is
+  parsed, so `place` cannot see the new atoms. This covers typing, paste, undo, redo, a reload, a
+  write from outside, and a pinned selection's reset.
 
 The cost per keystroke. The parse adds nothing: the atoms are read from `gutters`, which the parse
 already builds. A move adds one binary search over `gutters`, and an edit one more after its parse.
@@ -381,9 +397,11 @@ Neither allocates.
 
 The actions it touches: `Left`, `Right`, `SelectLeft`, `SelectRight`, `Backspace`, `Delete`, `Home`,
 `End`, `LineStart`, `LineEnd` (`text_input/actions.rs`); `Up`, `Down`, `SelectUp`, `SelectDown`,
-`DocStart`, `DocEnd` (`editor/actions.rs`, `motion.rs:34-60`); the click and the drag
-(`editor/mouse.rs:48-84`, `97-112`); `select_range` (`motion.rs:20-32`); the platform's marked
-text selection (`EditorState::mark_and_replace_in_range`); and `character_index_for_point`. Word
+`DocStart`, `DocEnd` (`editor/actions.rs`, `motion.rs:37-64`); the click, the box's click and the
+drag (`editor/mouse.rs:48-85`, `98-114`); and `select_range` (`motion.rs:20-35`). The platform's
+marked text selection (`EditorState::mark_and_replace_in_range`) lands on text not yet parsed, so
+it passes `no_snap` and `refresh` snaps it. `character_index_for_point` takes no snap: it answers
+the platform, and the hit test already gives a point over hidden blanks the text start. Word
 moves (`⌥←`, `⌥→`, `⌥⌫`) do not exist yet (word-wise editing spec, proposed). When they land, they
 go through `place` and `remove` with their direction's bias, so they need no rule of their own.
 
@@ -417,7 +435,8 @@ Risks.
 - Backspace at a code line's text start in an item joins it to the line above. In a code block that
   can surprise, because an editor usually deletes indent there. The owner's rule covers every
   markless item part, code lines included.
-- The quoted case (Open question 11) changes what Backspace removes on a held quoted line.
+- The quoted case (Open question 11) changes what Backspace removes on a held quoted line: the
+  `\n`, the quote part and the blanks.
 - A selection set past the gates (`state_mut` in tests) can sit inside an atom until the next move
   or edit. No user path does this.
 - `refresh` also runs inside `render`, where a snap changes the selection outside `move_cursor`,
@@ -425,10 +444,7 @@ Risks.
   before it shapes, and the element's measure reshapes when the conceals the selection touches
   differ (`is_shaped_from`, `crates/app/src/editor/layout/mod.rs:115-125`).
 
-Tests (STEP B, test-first). `Markdown::snap` by example in `inkra-markdown`. In `app`, one
-`simulate_keystrokes` test per binding above, on `- a\n  b`, `> - a\n>   b` and a code line in a
-task. Also a click and a drag on the hidden blanks, Backspace and Delete at both edges, and undo
-after the join. The layout oracle also asserts that no caret rests inside an atom after any step.
+Tests: the atom items of Tests.
 
 ## D3. The gutter and its width
 
@@ -573,7 +589,7 @@ limit of an unlisted file (`scripts/line-ceilings.sh:7`).
   that mark for the hit test and returns its square, or `None`.
 - **Paint.**
   - The visible-line loop calls `paint_marks` on each line (`crates/app/src/editor/layout/paint.rs:206`).
-    `paint_marks` (`paint.rs:227-269`) replaced T5's `paint_task`.
+    `paint_marks` (`paint.rs:227-273`) replaced T5's `paint_task`.
   - It paints each concealed mark at its `x`. A `•` or a number paints through `ShapedLine::paint`.
   - A text mark paints at the `y` that puts its baseline on the line's row-0 baseline. gpui
     sets a baseline at half the leading plus the ascent
@@ -590,7 +606,7 @@ limit of an unlisted file (`scripts/line-ceilings.sh:7`).
   - The marks paint with the gutter, after the selection (`crates/app/src/text_input/paint.rs:103-106`).
     gpui: `vendor/zed-reference/crates/gpui/src/window.rs`, `paint_quad` 4934, `paint_svg` 5235,
     `fill` 8128, `outline` 8140.
-- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>` (`paint.rs:322-334`)
+- **Hit test.** `DocumentLayout::task_at(local) -> Option<(Diff, ByteOffset)>` (`paint.rs:326-338`)
   returns the task's flip and its text start (D5). It finds the line under `local.y` and requires
   `local` inside its square. **(F)** `row_for_y` clamps
   (`crates/app/src/editor/layout/mod.rs:241-254`), so the square, not the line lookup, rejects a
@@ -606,7 +622,7 @@ The check icon is Lucide `check` in `crates/app/assets/icons/`, `IconName::Check
 
 ## D5. The click
 
-`on_mouse_down` (`crates/app/src/editor/mouse.rs:41-81`) calls `task_under` (36-39), which calls
+`on_mouse_down` (`crates/app/src/editor/mouse.rs:41-82`) calls `task_under` (36-39), which calls
 `task_at`, after focusing and before the `⌘`-click link branch (66-79).
 
 - A plain click on a box toggles and returns before `is_selecting` (80), so it starts no drag
@@ -621,7 +637,7 @@ The check icon is Lucide `check` in `crates/app/assets/icons/`, `IconName::Check
   (`crates/app/src/editor/reload.rs:24-26`). Three matching bytes would not prove the task is the
   same one. A mismatch edits nothing, and the click places the caret as any click does. Zed only
   debug-asserts here (`vendor/zed-reference/crates/markdown_preview/src/markdown_preview_view.rs:1220`).
-- The edit is `Task::flip` (`gutters.rs:124-130`): the middle byte, `x` for an unchecked one, a
+- The edit is `Task::flip` (`gutters.rs:154-160`): the middle byte, `x` for an unchecked one, a
   space for `x` or `X`. So `[\t]`, which pulldown-cmark reads as unchecked, flips to `[x]`, and a
   flip back writes `[ ]`: the tab is not restored. A vertical tab or a form feed goes the same way. `EditorState::apply_diff` runs one `Buffer::transact`: one undo step, merged with neither
   neighbour. The click then collapses the caret at the text start the layout holds, mapped through
@@ -632,7 +648,7 @@ The check icon is Lucide `check` in `crates/app/assets/icons/`, `IconName::Check
 
 The action `editor::ToggleTask` is bound to `cmd-l` in the editor context
 (`crates/app/src/keymap.rs:66`). The command palette lists it as "Toggle task" by its name; nothing
-else registers it. `toggle_task` (`crates/app/src/editor/actions.rs:171-181`) passes the cached
+else registers it. `toggle_task` (`crates/app/src/editor/actions.rs:173-183`) passes the cached
 parse and the selection to `cycle_tasks` (`crates/markdown/src/cycle.rs`). It applies the splices
 as one `Diff` through `EditorState::apply_diff`, the click's path. An empty batch takes no lease,
 since `as_mut` notifies and would schedule an autosave.
@@ -915,7 +931,7 @@ code block, a table, and a quote inside the item.
 - Its item part is its blanks from the quote part's end, as long as each blank's column is below the
   innermost gutter item's hang column.
 - The hang column is the column after the marker line's item part, by `column_after`
-  (`crates/markdown/src/items.rs:291-296`). So in `-\ta\n    b`, both lines hide four columns, and
+  (`crates/markdown/src/items.rs:293-298`). So in `-\ta\n    b`, both lines hide four columns, and
   `b` starts where `a` does.
 - So its text starts where the item's text starts, as a wrapped row does.
 - Columns count from the line's start, and a tab stops at the next multiple of 4 (D1, columns).
@@ -928,14 +944,17 @@ HTML block's text, which is a leaf's text.
   (`pulldown-cmark-0.13.6/src/firstpass.rs`, `append_code_text` and `append_html_line`). When the
   line's containers leave columns to the text, the first is an empty event at the line's text
   start, holding those columns as spaces: a split tab's other columns, or an HTML block's own
-  indent on its first line. A fence line gets no event.
+  indent on its first line. Three code lines get no event: a fence, a fence after a `>` that opens
+  on its line, and an empty line, which pulldown-cmark merges into the previous event.
 - So a line's **leaf text start** is the column of its first text event, less the columns an empty
   event holds: `column_after(0, line..start) - leftover`. The parse records each such event as a
-  `LeafText` in `Items::event`, in its one pass (D1).
+  `LeafText` in `Items::event`, in its one pass, while a list is open: only an open list holds a
+  gutter item (D1).
 - The item part of a line with a leaf text start is its blanks from the quote part's end whose
   column end is at or before that column. So a tab hides only when all its columns lie before the
   text, and a split tab stays in the text.
-- A line of a code block with no text event is a fence: its item part is all its leading blanks.
+- A line of a code block with no text event hides all its leading blanks: a fence, a fence after a
+  `>` that opens on the line, or an empty line merged into the previous event.
 - So in `- [ ] a\n\n  ```\n  def f():\n      return 1`, the hang column is 6, but `return`'s line
   hides two blanks and keeps its four columns of code indent.
 - A fence's own indent hides too: in `- a\n\n     ```\n     x\n       y`, the fence's line and
@@ -946,7 +965,8 @@ HTML block's text, which is a leaf's text.
   and the second stays, so `x` and `y` line up as in the source. Before the cross-slice review,
   `x`'s line hid both tabs and `y`'s line one, so the two painted one tab apart.
 - In `- [ ] a\n\n   <div>\n   x`, the HTML block's first line hides two blanks: pulldown-cmark gives
-  the block its own indent of one column. Its second line hides three.
+  the block its own indent of one column. Its second line hides two as well, and keeps that column
+  in its text.
 - Only blanks hide. In `- a\n  > -     x`, the inner item's code text lies past `> -`, and the item
   part is `  `.
 - The parse styles no blank of a split tab: the leftover columns are no byte, and the tab is not
@@ -956,7 +976,7 @@ HTML block's text, which is a leaf's text.
   indented, quoted and item-nested blocks, and a quote marker before the leftover columns, as in
   `- >```\n\t\t>`, stays a marker.
 - `column_after` lives in `items.rs`, and `cycle.rs` calls it there. So does `marker_end`
-  (`items.rs:283-288`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
+  (`items.rs:285-290`), the marker's end that `checkbox_at` reads (`cycle.rs:148-162`): one byte for
   a bullet, the digits and the `.` or `)` for a number.
 
 **A lazy line** hides the blanks it has and starts at the same place, because it continues the
@@ -977,7 +997,7 @@ own item part (D3, D).
 
 - An item's range from its `Start(Item)` event holds its lazy lines, and the blank lines after it.
 - The walk enters an item at its marker's line. The range can start on the line before
-  (`marker_start`, `crates/markdown/src/items.rs:274-279`).
+  (`marker_start`, `crates/markdown/src/items.rs:276-281`).
 
 Only a marker line's item part has a conceal (D2), so a row whose line opens no item has none.
 
@@ -1043,7 +1063,7 @@ Only a marker line's item part has a conceal (D2), so a row whose line opens no 
   - An indented code block's lines in `- a\n\n\t\tx\n\t\ty` both hide one tab (cross-slice review,
     M2).
   - An HTML block's lines hide their blanks up to their leaf text start: in `- [ ] a\n\n   <div>\n   x`
-    the first hides two blanks (cross-slice review).
+    both lines hide two blanks (cross-slice review).
   - In `- a\n  ```\n  x\n  ```\n  b\n    c`, `c`'s line hides two blanks: a paragraph after a
     block takes the hang column. In `- a\n\n  <!--\n\n  -->`, the blank line inside the HTML block
     gets an empty item part, as a code block's blank line does.
@@ -1064,6 +1084,9 @@ Only a marker line's item part has a conceal (D2), so a row whose line opens no 
   line's text but not its indent, every paragraph of a loose item, and no nested item, quote or
   code block inside the item.
 - `Markdown::task_at` finds a task by its line's start, and nothing at any other byte (T6a).
+- Atoms (D2, `parse/tests/atoms.rs`): `Markdown::snap` at every offset, both biases, of `- a\n  b`,
+  `- a\n\n  b`, `> - a\n>   b`, a fenced block in a task (its fences too) and `- a\n  ```\n\tx\n  ````,
+  whose split-tab line is no atom. `- a`, `- [ ] a\n- b`, `- a\nb` and `> a\n> b` have none.
 - `Structure` (T6a): `- a` holds an item at 0; `- 1. a` items at 0 and 2; `  -\t ` an item at 2;
   `> - a` a quote at 0 and an item at 2; `- > a` an item at 0 and a quote at 2; `a\n-` no item. `skipped` holds a code block, the front
   matter, a table, an HTML block, an ATX heading (`# a`, and `- # a` from the line's start) and an
@@ -1103,7 +1126,10 @@ Only a marker line's item part has a conceal (D2), so a row whose line opens no 
   pulldown-cmark passes, never `structure`, so they stay independent of it.
 
 `inkra-editor`: `apply_diff` is one undo step, merges with no neighbour, maps the selection, and
-edits nothing from a stale base.
+edits nothing from a stale base. With a fake snap over `- a\n  b` (`state/snap_tests.rs`), a step
+left lands at the run's start and any other at its end, Backspace and Delete take the run whole, a
+vertical move keeps its goal, and `EditorState::snap` moves a caret, widens a range and keeps a
+goal outside the run.
 
 `app`, headless `#[gpui::test]` against `MemFs`. The body is 18 px, a glyph is 10.8 px, and a
 standard slot is 26 px. Each `x` is compared with another line's measured `x` or with the slot's
@@ -1122,9 +1148,9 @@ constants, never with a glyph's computed width.
     quote part's width.
   - `- # a`: the `•`'s baseline is the heading's first-row baseline.
   - `- a`, `- `, `1. ` and `-`: the mark's baseline is the one the body font's metrics give row 0,
-    so an empty item's mark sits as a typed one's (D4, cross-slice review, M3). The headless text
-    system reports a descent below zero where `gpui_apple` reports it above, so the test negates the
-    font's descent as `gpui_apple` does.
+    so an empty item's mark sits as a typed one's (D4, cross-slice review, M3). `FontMetrics::descent`
+    is negative, below the baseline, while a laid-out line's descent is positive, so the test negates
+    the font's descent.
   - A wrapped bullet's second row starts at its text.
 - Toggling keeps a concealed line's text start (C).
 - Revealed (T6c1):
@@ -1149,11 +1175,28 @@ constants, never with a glyph's computed width.
   - Under `> - [ ] a\nb`, `b` starts under `a` and paints no box.
   - A code block in an item starts its background at the item's text, minus the outset
     (`crates/app/src/editor/layout/blocks.rs:118-123`). A caret on its blank line sits inside it.
-  - Home on the second line of `- a\n  b` puts the caret at the line's start. A letter typed there
-    lands before the blanks.
-  - In `- [ ] a\n      b`, a caret at the second line's start or at `b` reveals nothing: both sit
-    at `b`'s `x`, and no raw piece paints (cross-slice review).
+  - In `- [ ] a\n      b`, Home and Left from the line's end both land at `b`, which reveals
+    nothing: the caret sits at `b`'s `x`, and no raw piece paints (cross-slice review, D2).
   - A wrapped continuation line's rows start at `a`'s `x`.
+- Atoms (D2, `editor/tests/atoms.rs`), on `- a\n  b`, `> - a\n>   b` and a code line in a task:
+  - `left`, `right`, `shift-left` and `shift-right` step over the atom;
+  - `backspace` at the text start and `delete` at the previous line's end join the lines, to
+    `- ab` and `> - ab`, and `cmd-z` brings the atom back with the caret at the text start;
+  - `home`, `cmd-left` and `ctrl-a` land at the text start;
+  - `up`, `down`, `shift-up` and `shift-down` land at it from the lines around;
+  - a click and a drag over the hidden blanks land at it;
+  - `enter`, a letter and `cmd-v` at both edges, and `delete` at a marker line's start, leave the
+    caret at the edge or past the atom the edit makes;
+  - the property: on random notes of items, quotes, fences and blanks, after each key of a random
+    sequence from these bindings, `end`, `ctrl-e`, `cmd-up`, `cmd-down`, `tab`, `space`, `cmd-z`
+    and `cmd-shift-z`, neither end of the selection lies inside an atom. With the snap after the
+    parse removed, 256 cases missed it and 1024 found it. Its seeds, one per removed snap, sit in
+    `crates/app/proptest-regressions/editor/tests/atoms.txt`, and it runs 512 cases.
+  - `end`, `ctrl-e`, `cmd-right`, `cmd-up` and `cmd-down` get no test of their own: none can land
+    inside an atom, which ends at a text start, so no bug in their snap could show. The property
+    covers them.
+  - Up, Down, the click and the drag pass without the snap too: the layout's hit test gives a
+    point over hidden blanks the text start. They pin that.
 - `simulate_keystrokes("cmd-l")`: on a plain line, on a task, on a selection of three lines, and on
   `- > - [ ] a`, which it leaves. `cmd-enter` on a task line holding a link still follows it.
 - The layout oracle, its toggle through `DocumentLayout::task_at` (T6a). Only a concealed box can
@@ -1467,6 +1510,28 @@ Newest last. Each entry says what changed and why.
     `items/walk.rs`.
   - `markdown-lists` opens on the 8 to 11 list, so D3's number width shows; the note gains an empty
     `2. ` and an empty `- `.
+- **Hidden blanks as an atom** (2026-11-19, the owner's decision after the review of c217357e).
+  - A caret could rest inside a held line's hidden blanks, unseen at the text's `x`, and Home and a
+    letter typed after it landed before them. No caret rests there now, and every move, deletion
+    and edit steps over the atom whole (D2). Open question 11 was decided yes: the atom covers a
+    held quoted line's quote part.
+  - `ItemPart::marked` replaced the conceal's trim of the part's text as the one "has a mark"
+    predicate, so `Markdown::snap` reads it without the text.
+  - The review's other findings: `paint_marks` measures the font only at a line's first text mark;
+    the HTML example of D11 hides two blanks on both lines, and a test pins the second; the fence
+    set of D11 and Terms names all three lines with no text event; the M3 test's descent reason is
+    the sign of `FontMetrics::descent`.
+  - The parse records leaf text events only while a list is open, which the cross-slice review's
+    entry above had dropped as a filter no test could see. This one is cheaper: it reads the list
+    stack the parse keeps anyway.
+  - `- >```\n\t\t>` gives its second line no quote, though pulldown-cmark keeps the line in the
+    quote. This predates the stack: on `main` neither line has a gutter, as a quote inside an item
+    is no leading quote, and the stack's item gutters carry that rule.
+  - Measured in 12 alternating rounds against `task-boxes-t6b` (ee87f1a0): `markdown_parse/500000`
+    +2.25% on the median, +1.16 to +3.28% per round. The owner accepted the figure before it was
+    run. Over 4 alternating layout rounds, the cases run −3.7 to −7.8% on the median; one round ran
+    −5.4 to +1.1%. No change of this batch explains a faster shape, so the gain is probably build
+    or machine noise, not a win.
 
 **Reversed decisions.**
 
@@ -1587,7 +1652,7 @@ Newest last. Each entry says what changed and why.
   2, so its code lost up to four columns of its own indent (History, the T6c2 review). A code or
   HTML block's line now stops at its fence or its leaf text start, which the walk reads from
   pulldown-cmark's text events (D11).
-  - A fence line hides all its leading blanks, so a revealed fence stands over its code.
+  - A code line with no text event hides all its leading blanks, so a revealed fence stands over its code.
   - An HTML block's first line keeps its own indent in the text, because pulldown-cmark gives it to
     the block's text.
 - **From markdown-blocks D3.** A lazy line in an item starts at the item's text. Its quote part is
@@ -1661,9 +1726,9 @@ Newest last. Each entry says what changed and why.
     - The rejected alternative was one `Option<WidthKey>`, for the innermost ordered list. An outer
       ordered list's slots then take the standard width, so a line under two ordered lists starts
       off its parent's text when the outer list has wide numbers.
-11. **Does a held quoted line's atom cover its quote part?** (D2, the atom amendment draft.) Open,
-    for the owner.
-    - Recommended: yes. The atom runs from the previous line's end to the text start, so
+11. **Does a held quoted line's atom cover its quote part?** (D2.) Decided by the owner on
+    2026-11-19: yes, as recommended.
+    - Why: The atom runs from the previous line's end to the text start, so
       `> - a\n>   b` joins to `> - ab` on Backspace. A caret at the quote part's end paints at the
       text start's `x`, so a smaller atom leaves one unseen resting place. Deleting only the blanks
       gives `> - a\n>b`, which looks the same, the case the owner ruled out.
