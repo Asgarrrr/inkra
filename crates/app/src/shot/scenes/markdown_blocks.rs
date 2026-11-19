@@ -89,12 +89,14 @@ const LISTS: &str = "- A top bullet\n\
                      \x20\x20\x20- Its child\n\
                      \n\
                      - # A heading in a bullet\n\
-                     - An item holding code:\n\
+                     - [ ] A task holding code:\n\
                      \n\
                      \x20\x20```rust\n\
                      \x20\x20let x = 1;\n\
                      \n\
-                     \x20\x20let y = 2;\n\
+                     \x20\x20if x > 0 {\n\
+                     \x20\x20\x20\x20\x20\x20let y = 2;\n\
+                     \x20\x20}\n\
                      \x20\x20```";
 
 /// `down home` puts the caret on the second line's start, before its `  - `.
@@ -131,7 +133,7 @@ pub(super) const SCENES: [Scene; 4] = [
     },
     Scene {
         name: "markdown-lists-end",
-        shows: "the same note's end: 8. to 11. right-aligned on one dot column, their texts and 9.'s second line on one column, the child under 10. at its text; 1) to 3) on their own column; a quoted bullet's second line at its text; an ordered task's number then its box, its child under its text; a `•` on a heading's baseline; the caret on the closing fence shows both fences; the code block's lines, its blank line included, start at the item's text, and so does its background",
+        shows: "the same note's end: 1) to 3) on their own column; a quoted bullet's second line at its text; an ordered task's number then its box, its child under its text; a `•` on a heading's baseline; a task holding code: the caret on the closing fence shows both fences; the code block's lines, its blank line included, start at the task's text, and so does its background; `let y = 2;` keeps its own indent, four columns right of `if`",
         open: lists_end,
     },
 ];
