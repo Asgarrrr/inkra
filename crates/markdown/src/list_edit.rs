@@ -127,17 +127,14 @@ fn holder(text: &str, markdown: &Markdown, line: usize) -> Option<usize> {
     }
 }
 
-/// Whether item `at` is a gutter item: its marker lies in its marker line's item part.
+/// Whether item `at` is a gutter item: its marker lies in its marker line's gutter, so in its item
+/// part, since no marker lies in a quote part.
 fn is_gutter_item(text: &str, markdown: &Markdown, at: usize) -> bool {
     let marker = markdown.structure.items[at].marker;
     let line = ByteOffset::new(line_start(text, marker.get()));
-    markdown.gutter_on(line).is_some_and(|gutter| {
-        gutter
-            .item
-            .as_ref()
-            .is_some_and(|item| item.marked && item.start <= marker)
-            && marker < gutter.range.end
-    })
+    markdown
+        .gutter_on(line)
+        .is_some_and(|gutter| marker < gutter.range.end)
 }
 
 /// The column where item `at`'s content starts on its marker line (`CommonMark` 5.2).
