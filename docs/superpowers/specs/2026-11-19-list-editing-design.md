@@ -102,7 +102,8 @@ Yes, in every path a user reaches.
 
 So a list command reads `EditorView::markdown`, the parse the previous edit already paid for, and
 runs no pass over the note. It stamps its `Diff` with `parsed_at`, not with the buffer's version
-(D9). A parse that lags the text then fails `apply_diff`, and the command edits nothing.
+(D9). A parse that lags the text makes the command edit nothing: the handler checks `parsed_at`
+before it calls `continue_list`.
 
 ## What the references do
 
@@ -175,7 +176,8 @@ From knowledge; Obsidian is closed source.
 pub struct Item {
     /// Its marker, the bullet or the first digit.
     pub marker: ByteOffset,
-    /// Its range's end, as pulldown-cmark gives it: its block holds the lines that start before it.
+    /// Its range's end, without the last line ending pulldown-cmark gives it: its block holds the
+    /// lines that start before it.
     pub end: ByteOffset,
     /// Its parent item's index in `Structure::items`; `None` for a top-level item.
     pub parent: Option<u32>,
@@ -184,9 +186,11 @@ pub struct Item {
 }
 ```
 
-- A `Start` event carries its element's whole range, so `end` costs nothing.
+- A `Start` event carries its element's whole range, so `end` costs nothing. `end` drops the range's
+  last line ending, so `parse(t)` equals `parse(t + "\n")` and no offset lies past the text.
 - The collector keeps two stacks, of open items and of open lists, each entry with its range's end.
-  At each `Start(Item)` or `Start(List)` it pops the entries that end at or before the new start;
+  At each `Start(Item)` or `Start(List)` it pops the entries that end at or before the new marker,
+  not the new range's start, since an item's range can start a line early;
   the tops are the parent and the list. That needs no `End` event, and `Collector::start` already
   sees every `Start` (`structure.rs:33-51`).
 - Siblings share `list`, not merely `parent`. `1. a\n\npara\n\n2. x` is two lists, and in
@@ -257,15 +261,24 @@ First match wins.
      leaves becomes a blank line, so it keeps the trimmed quote part alone: `> - a\n>   |b` gives
      `> - a\n>\n>   |b`.
    - A lazy line's holder is the item it continues, so `> - a\nb|` gives `> - a\nb\n>   |`.
+   - A lazy line shows no `>`, so the line it leaves at its text start takes the container prefix's
+     quote part, trimmed: `> - a\n|b` gives `> - a\n>\n>   |b`, and `> a\n|b` gives `> a\n>\n> |b`.
+   - When the new line is blank, a lazy line right below the caret's would follow a blank line and
+     leave the item, so it takes the container prefix in place of its leading blanks, as in rule 6:
+     `- a\n  b|\nz` gives `- a\n  b\n  |\n  z`.
 3. **A caret on a marker line whose text opens a fence.** The new line takes the container prefix
-   of the caret item itself. `- ```rust|` gives `- ```rust\n  |`.
+   of the caret item itself. `- ```rust|` gives `- ```rust\n  |`. `CodeBlock` does not tell a fence
+   from indented code, so an indented code block on a marker line takes the rule too:
+   `-     code|` gives `-     code\n  |` (Known limits).
 4. **A code block outside every item and quote** takes the plain key.
 5. **A caret on an empty item's line, at or past its text start** (D3). An empty item holds no
    other line; a fallback item counts (D8).
 6. **A caret on a marker line past its text start, or at the text start of a marker line with no
    text.** The second case is an empty marker line that holds lines, which decision 6 creates
    (`- a\n- |\n  - c`). The edit replaces the blanks just before the caret, back to the text start,
-   with `\n` and the **continuation**:
+   with `\n` and the **continuation**. The blanks just after the caret go too, so the text that
+   moves starts at the new text start: `- a|    b` gives `- a\n- |b`, not indented code, and
+   `- b| c\n  - a` gives `- b\n- |c\n  - a`, with no width shift. The continuation is:
    - the container prefix of the caret item's parent, its holder;
    - spaces from there to the caret item's marker column, so `- - a` continues as `  - `;
    - the marker: the same bullet byte, or the number plus one with the same delimiter, its digits
@@ -286,7 +299,8 @@ First match wins.
    - blank lines between the caret's line and the moved lines stay above the new marker line, since
      an item may begin with at most one blank line (`CommonMark` 5.2). With the caret at the end of
      its line's text and only blank lines before the next held line, the continuation goes after
-     those blank lines: `- a|\n\n  b` gives `- a\n\n- |\n  b`, and `b` stays in the list;
+     those blank lines: `- a|\n\n  b` gives `- a\n\n- |\n  b`, and `b` stays in the list. The blanks
+     before the caret still go, as a second hunk: `- a |\n\n  b` gives `- a\n\n- |\n  b`;
    - when the new marker's content column differs from the old (`9.` to `10.`), the moved lines take
      the width shift (D7). `9. a|\n   - c` gives `9. a\n10. |\n    - c`.
 
@@ -311,6 +325,8 @@ First match wins.
      `Gutter::depth` quotes, their `>`s copied from the nearest line above that shows them all, as
      the container prefix takes them: `> a\nb|` gives `> a\nb\n> |`. A lazy line is never empty,
      so the exit does not apply to it.
+   - When the new line is blank, a lazy line right below takes the container prefix, as in rule 2:
+     `> a|\nz` gives `> a\n> |\n> z`.
 9. **A caret before the text start** of a marker line, in a revealed item part, takes the plain key.
    `|- a` moves the item down a line, as in Zed (case 8).
 10. **A line holding an opener past its text start** takes the plain key. In `- > - a` the inner
@@ -516,6 +532,8 @@ letter, which makes the line an item. The commands still read the marker:
 - `⇥` writes nothing (D4).
 - A fallback marker with text after it, as a lazy `para\n2. b`, is not a fallback item; the line
   takes the held-line or plain rules.
+- A line in a `Structure::skipped` range runs no fallback: a `- ` in front matter or in an HTML block
+  is no markdown marker, so `---\ntags:\n  - |\n---` and `<div>\n- |\n</div>` take the plain key.
 
 The fallback is one pulldown-cmark pass over one line, and runs only on the caret's line when no
 item opens there.
@@ -537,8 +555,8 @@ The caret is explicit because `apply_diff`'s mapping cannot place it everywhere:
 write the new marker line after blank lines, below the caret. `⇥` and `⇧⇥` with a selection keep
 `apply_diff`'s mapping of the selection, and their `caret` is the mapped head.
 
-- `newline` (`actions.rs:138-141`): with an empty selection and no marked text, it calls
-  `continue_list` on `EditorView::markdown`. The hunks become a `Diff` at `parsed_at`. Inside one
+- `newline`: with an empty selection, no marked text and `parsed_at` equal to the buffer's version,
+  it calls `continue_list` on `EditorView::markdown`. The hunks become a `Diff` at `parsed_at`. Inside one
   `edit_buffer`, `apply_diff` applies it and, when it lands, `EditorState::move_to` collapses the
   selection at `caret` (`state.rs:220-229`). It passes `inkra_editor::no_snap`: the snap of the
   parse before the edit would read the new offsets against old atoms, so `- a\n  b |\n  c` with `↩`
@@ -546,12 +564,15 @@ write the new marker line after blank lines, below the caret. `⇥` and `⇧⇥`
   for marked text (task boxes spec, D2). `None` inserts `\n` through `EditorState::insert`, so a
   plain `↩` still merges with typing.
 - `indent_item` and `outdent_item`: the same shape, with D4's fallbacks.
-- **A stale parse.** When `parsed_at` is not the buffer's version, `apply_diff` returns false and
-  the key edits nothing on that press. It never falls back to the plain key, whose edit could be the
+- **A stale parse.** When `parsed_at` is not the buffer's version, the handler returns before it
+  calls `continue_list`, and takes no lease: the old parse's offsets could fall outside the text. The
+  key edits nothing on that press. It never falls back to the plain key, whose edit could be the
   wrong one. `refresh` then parses as usual, so the next press works. No user path reaches it: every
   edit refreshes before the next key.
-- The four handlers live in a new `crates/app/src/editor/lists.rs`; `actions.rs` declares the two
-  actions and registers them, as it does `ToggleTask`.
+- The four handlers live in a new `crates/app/src/editor/actions/lists.rs`, declared from
+  `actions.rs`, which declares the two actions and registers them, as it does `ToggleTask`. Not
+  `editor/lists.rs`: `editor/mod.rs` sits at its line ceiling (`scripts/line-ceilings.tsv`), which
+  one more `mod` line would break.
 - `keymap.rs` gains `tab` → `IndentItem` and `shift-tab` → `OutdentItem` in the editor context.
   `ctrl-tab` and `ctrl-shift-tab` stay `AppShell`'s (`keymap.rs:98-99`).
 - Each list command is one undo step, since `apply_diff` transacts on its own.
@@ -565,7 +586,7 @@ lands at the end of that hunk's restored text. The owner accepts it (Open questi
 | Command | Caret after `⌘Z` |
 |---|---|
 | `↩` rule 2, 3, 6 or 8, one hunk | Where it was: the hunk ends at the caret. |
-| `↩` rule 6 with moved lines, a lazy-line prefix, a width shift or a renumbering | At the end of the lowest hunk, on a line below. |
+| `↩` rule 6 with moved lines, a lazy-line prefix, a width shift or a renumbering; rule 2 or 8 with a lazy-line prefix | At the end of the lowest hunk, on a line below. |
 | `↩` rule 6 written after blank lines | At the end of the lowest hunk: the new marker line's start or a moved line. |
 | `↩` rule 7, either form | At the marker line's start, before the item part: the hunk is an insertion there. |
 | D3 top level | Where it was: the restored item part ends at the line's end. |
@@ -587,7 +608,8 @@ job (`items.rs:285-290`).
   the note: no command verifies its edit by parsing a copy, unlike `⌘L`. The fallback (D8) is one
   pass over the caret's line, only where no item opens.
 - Finding the caret item costs two binary searches. A sibling, parent or holder costs the depth.
-- `↩` writes O(line) bytes, plus the lines that move. `⇥` and `⇧⇥` cost the moved blocks' lines.
+- `↩` writes O(line) bytes, plus the lines that move. With no width shift, it reads one line below
+  the caret item's marker line, not the item's whole block. `⇥` and `⇧⇥` cost the moved blocks' lines.
   Renumbering and the width shift cost the edited list's later siblings and their lines.
 - The edit then reparses once through `refresh`, as any keystroke does.
 - `Item` grows `Structure::items` from 8 to 32 bytes per item, filled in the existing pass. No
@@ -723,6 +745,14 @@ markdown mutants on the diff (CLAUDE.md, Commands).
   that `backspace_markup` returned a `Diff` (now a `ListEdit`, D5), that `⌫` left an ordered child
   list starting past `1` as text (renumbered, D5 rule 1), and that rule 8 had no source for a lazy
   line's `>`s (`Gutter::depth`, D2 rule 8).
+- 2026-11-21: the review of L1 found that rule 2 split a quote at a lazy line's text start (its quote
+  part now comes from the container prefix), that rules 2 and 8 left a lazy line below outside its
+  item or quote (they write its prefix, as rule 6 does), that the fallback read markers in front
+  matter and HTML (D8 skips skipped ranges), that rule 6 kept the blanks after the caret and, past
+  blank lines, before it (both go), and that the moved-line walk read the whole block with no shift.
+  The handler moved to `editor/actions/lists.rs` for the line ceiling, `Item::end` drops its last
+  line ending, the stale-parse check runs before `continue_list`, and four cases became Known
+  limits.
 
 ## Deviations
 
@@ -749,6 +779,19 @@ markdown mutants on the diff (CLAUDE.md, Commands).
   empty item does.
 - **From Obsidian, the indent byte.** Obsidian indents with a tab by default (unsure). Inkra writes
   spaces, whose columns are exact in a quote and after a wide number.
+
+## Known limits
+
+Accepted as rare by the L1 review (2026-11-21); the `↩` property skips them.
+
+- A blank line written right under an empty marker line, by rule 7's blank-line form or rule 2 at a
+  text start, ends that item before the lines it held: `> - \n>   1. |a` turns `1. a` into a
+  sibling list.
+- Quoted indented code that no item holds loses its code indent under rule 2: the parse records a
+  leaf text start only while a list is open (task boxes spec, D11), so `>     x|` gives `>\n> `.
+- In L1, `↩` on a nested empty item on the same line as its parent, `- - |`, deletes the whole item
+  part, the parent's marker included. L2's D3 nested case replaces it.
+- Rule 3 fires on an indented code block that opens on a marker line (D2, rule 3).
 
 ## Deferred
 
