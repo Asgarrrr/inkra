@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use gpui::{ClipboardItem, Context, Div, InteractiveElement, Window, actions};
 use inkra_editor::{Copied, EditorState, LogicalMovement};
 use inkra_text::Diff;
@@ -133,11 +131,6 @@ impl EditorView {
         self.move_cursor(window, cx, |state, buffer| {
             state.move_(buffer, LogicalMovement::DocEnd, false, snap);
         });
-    }
-
-    pub(super) fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
-        let now = Instant::now();
-        self.edit_buffer(window, cx, |state, buffer| state.insert(buffer, now, "\n"));
     }
 
     pub(super) fn follow_link(&mut self, _: &FollowLink, _: &mut Window, cx: &mut Context<Self>) {
