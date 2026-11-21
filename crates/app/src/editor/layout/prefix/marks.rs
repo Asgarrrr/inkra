@@ -24,10 +24,19 @@ pub(in crate::editor::layout) struct Mark {
 
 pub(in crate::editor::layout) enum Paint {
     /// A `•` or a number, at the body size.
-    Text(Rc<ShapedLine>),
+    Text(Rc<ShapedLine>, Align),
     Box {
         checked: bool,
     },
+}
+
+/// Where a text mark sits on its line's row 0 (D4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::editor::layout) enum Align {
+    /// A number: its baseline on the line's, as text.
+    Baseline,
+    /// A `•`: its x-height's middle on the line's, as a symbol.
+    XHeight,
 }
 
 /// What marker lines share within one `shape_document`: each mark text's shape and each width
@@ -84,13 +93,18 @@ impl<'a> Marks<'a> {
                     .or_insert_with(|| Rc::new(shape(text))),
             );
             // A `•` centres on the box's axis; a number ends a gap left of its slot's end.
-            let at = match mark {
-                ItemMarker::Bullet => left + (TASK_BOX_SIZE - shaped.width()) / 2.,
-                ItemMarker::Number(_) => left + slot - LIST_SLOT_GAP - shaped.width(),
+            let (at, align) = match mark {
+                ItemMarker::Bullet => {
+                    (left + (TASK_BOX_SIZE - shaped.width()) / 2., Align::XHeight)
+                }
+                ItemMarker::Number(_) => (
+                    left + slot - LIST_SLOT_GAP - shaped.width(),
+                    Align::Baseline,
+                ),
             };
             marks.push(Mark {
                 x: at,
-                paint: Paint::Text(shaped),
+                paint: Paint::Text(shaped, align),
             });
             left += slot;
         }

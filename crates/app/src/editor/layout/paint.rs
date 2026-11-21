@@ -8,7 +8,7 @@ use inkra_text::{ByteOffset, Diff};
 
 use super::DocumentLayout;
 use super::line::LineLayout;
-use super::prefix::{Paint, Prefix};
+use super::prefix::{Align, Paint, Prefix};
 use crate::theme;
 use crate::ui::IconName;
 
@@ -222,8 +222,9 @@ impl DocumentLayout {
         }
     }
 
-    /// Each concealed mark of `line`, at `origin`: a `•` or a number with its baseline on the
-    /// text's row-0 baseline, the box centred on row 0 (task boxes spec, D4).
+    /// Each concealed mark of `line`, at `origin`: a number with its baseline on the text's row-0
+    /// baseline, a `•` with its x-height's middle on the text's, the box centred on row 0 (task
+    /// boxes spec, D4).
     fn paint_marks(
         &self,
         origin: Point<Pixels>,
@@ -239,16 +240,24 @@ impl DocumentLayout {
         let baseline =
             |ascent: Pixels, descent: Pixels| (row_height - ascent - descent) / 2. + ascent;
         // A line of boxes alone never measures its font.
-        let mut text_baseline = None;
+        let mut text = None;
         for mark in prefix.marks() {
             match &mark.paint {
-                Paint::Text(shaped) => {
-                    let text_baseline = *text_baseline.get_or_insert_with(|| {
-                        let (ascent, descent) = line.text_metrics(window);
-                        baseline(ascent, descent)
-                    });
+                Paint::Text(shaped, align) => {
+                    let text = *text.get_or_insert_with(|| line.text_metrics(window));
                     let mark_baseline = baseline(shaped.ascent, shaped.descent);
-                    let at = origin + point(mark.x, text_baseline - mark_baseline);
+                    // Zero when the line's font is the mark's: body font, body size.
+                    let rise = match align {
+                        Align::Baseline => px(0.),
+                        Align::XHeight => {
+                            let x_height = shaped.runs.first().map_or(px(0.), |run| {
+                                window.text_system().x_height(run.font_id, shaped.font_size)
+                            });
+                            (text.x_height - x_height) / 2.
+                        }
+                    };
+                    let y = baseline(text.ascent, text.descent) - rise - mark_baseline;
+                    let at = origin + point(mark.x, y);
                     #[cfg(test)]
                     PAINTED_MARKS.with(|painted| {
                         painted.borrow_mut().push(PaintedMark {
