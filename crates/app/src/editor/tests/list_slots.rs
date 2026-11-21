@@ -139,8 +139,27 @@ fn a_number_wider_than_a_slot_widens_its_list(cx: &mut TestAppContext) {
     assert!(text[0] > text[1], "{text:?}");
 }
 
-/// A mark sits on its line's baseline as the body font's metrics place it at the line's size: on
-/// an empty item as once a letter is typed, before a heading at the heading's size (D4).
+/// Line `line`'s row-0 baseline and x-height, from the body font's metrics at the line's size.
+fn line_metrics(window: &Handle, cx: &mut VisualTestContext, line: usize) -> (Pixels, Pixels) {
+    window
+        .update(cx, |view, window, _| {
+            let layout = view.input.last_layout().unwrap();
+            let (top, row_height, size) = layout.row_metrics(line);
+            let text_system = window.text_system();
+            let font = text_system.resolve_font(&layout.style().font());
+            let ascent = text_system.ascent(font, size);
+            // Below the baseline, a font's descent is negative; a laid-out line's is not.
+            let descent = -text_system.descent(font, size);
+            // gpui's baseline: half the leading, then the ascent (`text_system/line.rs:557-558`).
+            let baseline = top + (row_height - ascent - descent) / 2. + ascent;
+            (baseline, text_system.x_height(font, size))
+        })
+        .unwrap()
+}
+
+/// A number sits on its line's baseline as the body font's metrics place it at the line's size, a
+/// `•` on a body line too: on an empty item as once a letter is typed, before a heading at the
+/// heading's size (D4).
 #[gpui::test]
 fn a_mark_sits_on_its_lines_baseline(cx: &mut TestAppContext) {
     for note in [
@@ -148,29 +167,34 @@ fn a_mark_sits_on_its_lines_baseline(cx: &mut TestAppContext) {
         "- \n\nbody",
         "1. \n\nbody",
         "-\n\nbody",
-        "- # a\n\nbody",
+        "1. # a\n\nbody",
     ] {
         let (window, mut cx) = editor(cx, note);
         let marks = marks(&window, &mut cx);
-        let baseline = window
-            .update(&mut cx, |view, window, _| {
-                let layout = view.input.last_layout().unwrap();
-                let (top, row_height, size) = layout.row_metrics(0);
-                let text_system = window.text_system();
-                let font = text_system.resolve_font(&layout.style().font());
-                let ascent = text_system.ascent(font, size);
-                // Below the baseline, a font's descent is negative; a laid-out line's is not.
-                let descent = -text_system.descent(font, size);
-                // gpui's baseline: half the leading, then the ascent (`text_system/line.rs:557-558`).
-                top + (row_height - ascent - descent) / 2. + ascent
-            })
-            .unwrap();
+        let (baseline, _) = line_metrics(&window, &mut cx, 0);
         assert_eq!(marks.len(), 1, "{note:?}: {marks:?}");
         assert!(
             (marks[0].3 - baseline).abs() < px(0.01),
             "{note:?}: {marks:?} {baseline:?}"
         );
     }
+}
+
+/// A `•` before a heading centres on the heading's x-height, not its baseline: a body-size dot on
+/// a large baseline reads low (D4).
+#[gpui::test]
+fn a_bullet_centres_on_a_headings_x_height(cx: &mut TestAppContext) {
+    let (window, mut cx) = editor(cx, "- # a\n\nbody");
+    let marks = marks(&window, &mut cx);
+    let (baseline, x_height) = line_metrics(&window, &mut cx, 0);
+    let (_, body_x_height) = line_metrics(&window, &mut cx, 2);
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    assert!(x_height > body_x_height, "{x_height:?} {body_x_height:?}");
+    let centre = marks[0].3 - body_x_height / 2.;
+    assert!(
+        (centre - (baseline - x_height / 2.)).abs() < px(0.01),
+        "{marks:?} {baseline:?} {x_height:?}"
+    );
 }
 
 /// A wrapped bullet's later rows start at its text.

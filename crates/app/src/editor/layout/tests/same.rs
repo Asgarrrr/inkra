@@ -46,7 +46,9 @@ fn assert_line(carried: &Placed, fresh: &Placed) -> Result<(), TestCaseError> {
         let marks = line.prefix.iter().flat_map(prefix::Prefix::marks);
         marks
             .map(|mark| match &mark.paint {
-                prefix::Paint::Text(shaped) => (mark.x, Some(shaped.text.to_string()), None),
+                prefix::Paint::Text(shaped, align) => {
+                    (mark.x, Some((shaped.text.to_string(), *align)), None)
+                }
                 prefix::Paint::Box { checked } => (mark.x, None, Some(*checked)),
             })
             .collect::<Vec<_>>()
