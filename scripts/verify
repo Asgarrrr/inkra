@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 # The one gate agents must pass before ending a turn (see the verify-gate hook).
-exec "$(dirname "$0")/check.sh" "$@"
+# The duplication ratchet needs the branch base, which CI's shallow checkout lacks: it runs here, not in check.sh.
+set -euo pipefail
+cd "$(dirname "$0")"
+echo "==> duplication"
+./duplication.sh
+exec ./check.sh "$@"
