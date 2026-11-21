@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# The one gate agents must pass before ending a turn (see the verify-gate hook).
+exec "$(dirname "$0")/check.sh" "$@"
