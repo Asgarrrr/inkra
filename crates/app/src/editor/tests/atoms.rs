@@ -177,7 +177,7 @@ fn a_click_and_a_drag_on_hidden_blanks_land_at_the_text(cx: &mut TestAppContext)
 fn enter_typing_and_paste_at_an_atoms_edges(cx: &mut TestAppContext) {
     for (text, from, keys, edited, caret) in [
         // `↩` continues the item, or splits the held line (list editing spec, D2).
-        ("- a  b", 3, "enter", "- a\n-   b", 8),
+        ("- a  b", 3, "enter", "- a\n- b", 6),
         (HELD, 3, "enter", "- a\n- \n  b\n\nbody", 6),
         (HELD, 6, "enter", "- a\n\n  b\n\nbody", 7),
         (HELD, 3, "x", "- ax\n  b\n\nbody", 4),

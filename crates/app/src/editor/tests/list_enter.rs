@@ -54,6 +54,8 @@ fn cmd_z_undoes_enter_in_one_step(cx: &mut TestAppContext) {
         ("- a", 3, "- a\n- ", 6, 3),
         // Rule 2, one hunk.
         ("- a\n  b", 7, "- a\n  b\n  ", 10, 7),
+        // Rule 2 with a lazy-line prefix: the end of the lowest hunk, the lazy line's start.
+        ("- a\n  b\nz", 7, "- a\n  b\n  \n  z", 10, 8),
         // Rule 3.
         ("- ```rust", 9, "- ```rust\n  ", 12, 9),
         // Rule 8.

@@ -15,9 +15,7 @@ use super::tests::apply;
 use crate::spans::{line_end, line_start};
 use crate::{ListEdit, Markdown, parse};
 use oracle::{containers, oracle, shape};
-use skips::{
-    blank_under_empty_marker, breaks_below, lazy_quote_at_start, splits_opener, unheld_quoted_code,
-};
+use skips::{blank_under_empty_marker, splits_opener, unheld_quoted_code};
 
 /// Each `\n` the hunks insert, as an offset in the edited text.
 fn inserted_newlines(hunks: &[Hunk]) -> Vec<usize> {
@@ -27,6 +25,15 @@ fn inserted_newlines(hunks: &[Hunk]) -> Vec<usize> {
         let start = hunk.range.start.get().saturating_add_signed(grown);
         out.extend(hunk.text.match_indices('\n').map(|(at, _)| start + at));
         grown += hunk.text.len().cast_signed() - (hunk.range.end - hunk.range.start).cast_signed();
+    }
+    out
+}
+
+/// Where `at` lands once `hunks` apply: past a hunk that ends at or before it.
+fn shifted(hunks: &[Hunk], at: usize) -> usize {
+    let mut out = at;
+    for hunk in hunks.iter().filter(|hunk| hunk.range.end.get() <= at) {
+        out = out + hunk.text.len() - (hunk.range.end - hunk.range.start);
     }
     out
 }
@@ -82,19 +89,15 @@ fn intended_structure(
             .iter()
             .any(|hunk| (hunk.range.start.get()..hunk.range.end.get()).contains(&at))
     };
-    let shifted = |at: usize| {
-        let mut out = at;
-        for hunk in edit.hunks.iter().filter(|hunk| hunk.range.end.get() <= at) {
-            out = out + hunk.text.len() - (hunk.range.end - hunk.range.start);
-        }
-        out
-    };
     // A quote's nesting: the quotes holding its opener, itself included.
     let level = |quotes: &[Range<usize>], at: usize| {
         quotes.iter().filter(|quote| quote.contains(&at)).count()
     };
     for quote in old_quotes.iter().filter(|quote| !deleted(quote.start)) {
-        let (to, nesting) = (shifted(quote.start), level(&old_quotes, quote.start));
+        let (to, nesting) = (
+            shifted(&edit.hunks, quote.start),
+            level(&old_quotes, quote.start),
+        );
         prop_assert!(
             new_quotes
                 .iter()
@@ -178,12 +181,10 @@ fn continued(
 fn check(text: &str, caret: usize) -> Result<(), TestCaseError> {
     prop_assume!(!splits_opener(text, caret));
     let markdown = parse(text);
-    prop_assume!(!lazy_quote_at_start(text, &markdown, caret));
     prop_assume!(!unheld_quoted_code(text, &markdown, caret));
     let Some(edit) = continue_list(text, &markdown, ByteOffset::new(caret)) else {
         return Ok(());
     };
-    prop_assume!(!breaks_below(text, &markdown, caret, &edit.hunks));
     // Rule 8's exit ends the quote on purpose, so what follows goes in a new one.
     let exits = matches!(&edit.hunks[..], [hunk]
         if hunk.text.is_empty() && text.as_bytes()[hunk.range.start.get()] == b'>');
@@ -200,6 +201,34 @@ fn check(text: &str, caret: usize) -> Result<(), TestCaseError> {
     );
 
     intended_structure(text, caret, &edit, &new)?;
+    // P0: when `↩` adds a line, every other line keeps its quotes and the count of items holding
+    // it. D3's deletion may let a line join the item above, by design.
+    let caret_line = line_start(text, caret);
+    let adds = edit.hunks.iter().any(|hunk| hunk.text.contains('\n'));
+    let mut start = if adds { 0 } else { text.len() };
+    while start < text.len() {
+        let end = line_end(text, start);
+        let touched = edit.hunks.iter().any(|hunk| {
+            let range = hunk.range.start.get()..hunk.range.end.get();
+            range.contains(&start) && range.start < start
+        });
+        if start != caret_line
+            && !text[start..end].trim_matches([' ', '\t', '>']).is_empty()
+            && !touched
+        {
+            let to = line_start(&new, shifted(&edit.hunks, start));
+            prop_assert_eq!(
+                containers(&new, to),
+                containers(text, start),
+                "line {} of {:?} at {} gave {:?}",
+                start,
+                text,
+                caret,
+                new
+            );
+        }
+        start = end + 1;
+    }
     // P5: each inserted `\n` starts a line in the caret line's quotes and items.
     let held = containers(text, line_start(text, caret));
     for newline in inserted_newlines(&edit.hunks) {

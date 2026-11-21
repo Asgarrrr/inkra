@@ -8,7 +8,7 @@ use inkra_text::ByteOffset;
 use super::shift::shifted;
 use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk, lines_before};
 use crate::Markdown;
-use crate::items::{MarkerBlanks, column_after, marker_end};
+use crate::items::{MarkerBlanks, marker_end};
 use crate::structure::innermost_item;
 
 /// The edit `↩` makes at `caret` in `text`, as `markdown`, its parse, reads it; `None` where no
@@ -25,25 +25,20 @@ pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Opti
         return Some(on_marker_line(text, markdown, &line, item, caret));
     }
     let holder = holder(text, markdown, line.range.start);
-    let prefix = |column| container_prefix(text, markdown, line.range.start, column);
     if in_code(markdown, &line) {
         // A code line keeps its blanks before its leaf text start.
         let gutter = line.gutter?;
         let held = holder.map_or(0, |at| content_column(text, markdown, at));
         let column = held.max(line.column(text, gutter.range.end.get()));
-        return Some(split(text, &line, caret, &prefix(column)));
+        return Some(split(text, markdown, &line, caret, column));
     }
     // Its line is a marker line: before its text start, the plain key (rule 9).
-    if let Some(start) = empty_fallback(text, &line) {
+    if let Some(start) = empty_fallback(text, markdown, &line) {
         return (caret >= start).then(|| leave(&line));
     }
     if let Some(at) = holder {
-        return Some(split(
-            text,
-            &line,
-            caret,
-            &prefix(content_column(text, markdown, at)),
-        ));
+        let column = content_column(text, markdown, at);
+        return Some(split(text, markdown, &line, caret, column));
     }
     let gutter = line.gutter?;
     match gutter.quotes.last() {
@@ -51,7 +46,7 @@ pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Opti
         Some(&last) if gutter.quotes.len() == gutter.depth && line.is_blank(text) => {
             Some(ListEdit::replace(last.get()..line.range.end, String::new()))
         }
-        _ => Some(split(text, &line, caret, &prefix(0))),
+        _ => Some(split(text, markdown, &line, caret, 0)),
     }
 }
 
@@ -105,7 +100,16 @@ fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
 /// The text start of an empty marker the fallback reads on a line where no item opens and no code
 /// lies: one pass over the line past its quote part and leading blanks, padded so its tab stops
 /// fall where the line's do (D8).
-fn empty_fallback(text: &str, line: &Line<'_>) -> Option<usize> {
+fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
+    // Front matter and HTML hold no markdown marker.
+    let skipped = &markdown.structure.skipped;
+    let at = skipped.partition_point(|range| range.end.get() < line.range.start);
+    if skipped
+        .get(at)
+        .is_some_and(|range| range.start.get() <= line.range.start)
+    {
+        return None;
+    }
     #[cfg(test)]
     FALLBACKS.set(FALLBACKS.get() + 1);
     let from = line.lead_end(text);
@@ -151,16 +155,17 @@ fn on_marker_line(
 }
 
 /// `↩` past an item's text, or on an empty marker line that holds lines: the next sibling, in
-/// place of `blanks`, the blanks before the caret, or past the blank lines below when nothing
-/// follows the caret, taking the lines the item holds below it (D2, rule 6, D7).
+/// place of `cut`, the blanks before the caret and after it, or past the blank lines below when
+/// nothing follows the caret, taking the lines the item holds below it (D2, rule 6, D7).
 fn continued(
     text: &str,
     markdown: &Markdown,
     line: &Line<'_>,
     item: usize,
-    blanks: Range<usize>,
+    cut: Range<usize>,
     rest_blank: bool,
 ) -> ListEdit {
+    let cut = cut.start..cut.end + blanks(&text[cut.end..line.range.end]);
     let end = markdown.structure.items[item].end.get();
     let blank = |held: &Range<usize>| Line::at(text, markdown, held.start).is_blank(text);
     let mut below = lines_before(text, line.range.end + 1, end).peekable();
@@ -168,49 +173,46 @@ fn continued(
     while let Some(held) = below.next_if(blank) {
         last_blank = Some(held);
     }
+    let (continuation, marker) = continuation(text, markdown, line, item, 1);
+    let inserted = format!("\n{continuation}");
     // An item begins with one blank line at most, so the new one follows them.
     let past_blanks = last_blank.filter(|_| rest_blank && below.peek().is_some());
-    let (at, moved) = match past_blanks {
-        Some(held) => (held.end..held.end, held.end + 1),
-        None => (blanks, line.range.end + 1),
-    };
-    let (continuation, marker) = continuation(text, markdown, line, item, 1);
-    // The text after the caret starts the new line, its blanks included; an empty line has none.
-    let rest = if rest_blank {
-        ""
-    } else {
-        &text[at.end..line.range.end]
-    };
-    let column = MarkerBlanks::at(&format!("{continuation}{rest}"), 0, marker).content_column();
-    let old = content_column(text, markdown, item);
-    // The caret lands at the new text start, past the blanks the text brought.
-    let mut reached = column_after(0, continuation.as_bytes());
-    let past = rest
-        .bytes()
-        .take_while(|&byte| {
-            let before = reached;
-            reached = column_after(reached, &[byte]);
-            before < column && matches!(byte, b' ' | b'\t')
-        })
-        .count();
-    let mut edit = ListEdit::replace(at, format!("\n{continuation}"));
-    edit.caret = ByteOffset::new(edit.caret.get() + past);
-    for (index, held) in lines_before(text, moved, end).enumerate() {
-        let held = Line::at(text, markdown, held.start);
-        if held.is_blank(text) {
-            continue;
+    let (mut edit, moved) = match past_blanks {
+        Some(held) => {
+            let caret = held.end - cut.len() + inserted.len();
+            let gone = (!cut.is_empty()).then(|| hunk(cut.clone(), String::new()));
+            let hunks = gone.into_iter().chain([hunk(held.end..held.end, inserted)]);
+            let caret = ByteOffset::new(caret);
+            (
+                ListEdit {
+                    hunks: hunks.collect(),
+                    caret,
+                },
+                held.end + 1,
+            )
         }
-        let lead = held.lead_end(text);
-        let lazy = held.column(text, lead) < old
-            || held
-                .gutter
-                .is_some_and(|gutter| gutter.quotes.len() < gutter.depth);
+        None => (ListEdit::replace(cut, inserted), line.range.end + 1),
+    };
+    let column = MarkerBlanks::at(&continuation, 0, marker).content_column();
+    let shift = column.saturating_sub(content_column(text, markdown, item));
+    // Only a shift reaches past the first line the new item takes.
+    let reach = if shift == 0 { 1 } else { usize::MAX };
+    let held = lines_before(text, moved, end)
+        .map(|held| {
+            #[cfg(test)]
+            MOVED_READ.set(MOVED_READ.get() + 1);
+            Line::at(text, markdown, held.start)
+        })
+        .filter(|held| !held.is_blank(text))
+        .take(reach);
+    for (index, held) in held.enumerate() {
         // An empty marker line opens no paragraph for the lazy line right below to continue.
-        if index == 0 && rest_blank && lazy {
+        if index == 0 && rest_blank && held.is_lazy(text, markdown) {
             let prefix = container_prefix(text, markdown, held.range.start, column);
-            edit.hunks.push(hunk(held.range.start..lead, prefix));
-        } else if column > old {
-            edit.hunks.push(shifted(&held, text, column - old));
+            edit.hunks
+                .push(hunk(held.range.start..held.lead_end(text), prefix));
+        } else if shift > 0 {
+            edit.hunks.push(shifted(&held, text, shift));
         }
     }
     edit
@@ -290,17 +292,31 @@ fn continuation(
     (out, offset)
 }
 
-/// The blanks before `caret`, back to the text start, replaced by `\n` and `prefix`; a line left
-/// with no text keeps its quote part alone, trimmed (D2, rules 2 and 8).
-fn split(text: &str, line: &Line<'_>, caret: usize, prefix: &str) -> ListEdit {
+/// The blanks before `caret`, back to the text start, replaced by `\n` and the container prefix
+/// to `column`; a line left with no text keeps the quote part alone, trimmed, as the container
+/// prefix writes it, so a lazy line keeps its quote too. A blank new line gives a lazy line below
+/// its prefix (D2, rules 2 and 8).
+fn split(
+    text: &str,
+    markdown: &Markdown,
+    line: &Line<'_>,
+    caret: usize,
+    column: usize,
+) -> ListEdit {
     let text_start = line.text_start();
     let typed = text[text_start..caret].trim_end_matches([' ', '\t']).len();
-    let start = if typed == 0 {
-        line.trimmed_quote_end(text)
+    let prefix = container_prefix(text, markdown, line.range.start, column);
+    let (start, left) = if typed == 0 {
+        let quote = container_prefix(text, markdown, line.range.start, 0);
+        (line.range.start, quote.trim_end().to_owned())
     } else {
-        text_start + typed
+        (text_start + typed, String::new())
     };
-    ListEdit::replace(start..caret, format!("\n{prefix}"))
+    let mut edit = ListEdit::replace(start..caret, format!("{left}\n{prefix}"));
+    if blanks(&text[caret..line.range.end]) == line.range.end - caret {
+        edit.hunks.extend(line.lazy_below(text, markdown, column));
+    }
+    edit
 }
 
 /// The empty item's line past its quote part, deleted: the list ends there (D3).
@@ -311,6 +327,8 @@ fn leave(line: &Line<'_>) -> ListEdit {
 #[cfg(test)]
 thread_local! {
     pub(super) static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// The lines a continuation's walk over the lines it takes reads.
+    pub(super) static MOVED_READ: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

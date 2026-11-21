@@ -2,7 +2,7 @@
 
 use inkra_text::{ByteOffset, Hunk};
 
-use super::{FALLBACKS, continue_list};
+use super::{FALLBACKS, MOVED_READ, continue_list};
 use crate::parse;
 
 pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
@@ -86,6 +86,13 @@ fn a_quoted_item_continues_in_its_quote() {
 /// The lines the item holds below move with the new item, which takes its children (decision 6).
 #[test]
 fn the_new_item_takes_the_lines_below() {
+    // The blanks after the caret go as the blanks before it do, so no child moves.
+    check(&[
+        ("- a|    b", "- a\n- |b"),
+        ("- b| c\n  - a", "- b\n- |c\n  - a"),
+        ("- b|\tc\n  - a", "- b\n- |c\n  - a"),
+        ("- b|      c\n  - a", "- b\n- |c\n  - a"),
+    ]);
     check(&[
         ("- a|\n  - c", "- a\n- |\n  - c"),
         ("- a|\n  b", "- a\n- |\n  b"),
@@ -115,6 +122,7 @@ fn past_blank_lines_the_new_item_keeps_the_lines_below_in_the_list() {
         ("- a|\n\n  b", "- a\n\n- |\n  b"),
         ("- a|\n\n\n  b", "- a\n\n\n- |\n  b"),
         ("> - a|\n>\n>   b", "> - a\n>\n> - |\n>   b"),
+        ("- a |\n\n  b", "- a\n\n- |\n  b"),
     ]);
     // Nothing the item holds follows the blank lines: the new item goes right below.
     check(&[
@@ -138,9 +146,6 @@ fn a_wider_marker_shifts_the_lines_it_takes() {
             "9. a|\n   ```\n   x\n   ```",
             "9. a\n10. |\n    ```\n    x\n    ```",
         ),
-        ("- b| c\n  - a", "- b\n-  |c\n   - a"),
-        ("- b|\tc\n  - a", "- b\n- \t|c\n    - a"),
-        ("- b|      c\n  - a", "- b\n- |      c\n  - a"),
     ]);
 }
 
@@ -222,6 +227,15 @@ fn a_held_line_goes_on_in_its_item() {
         ("> - a\nb|", "> - a\nb\n>   |"),
         ("- [ ] a\n  b|", "- [ ] a\n  b\n  |"),
     ]);
+    // A lazy line below a blank new line takes the container prefix, so it stays in the item.
+    check(&[
+        ("- a\n  b|\nz", "- a\n  b\n  |\n  z"),
+        ("- a\nb|\nz", "- a\nb\n  |\n  z"),
+        ("1. a\n   9. a|\nz", "1. a\n   9. a\n   |\n   z"),
+        ("> - a\n>   b|\nz", "> - a\n>   b\n>   |\n>   z"),
+        ("- a\n  b|c\nz", "- a\n  b\n  |c\nz"),
+        ("- a\n  b|\n- c", "- a\n  b\n  |\n- c"),
+    ]);
 }
 
 /// The line the caret leaves turns blank, so it keeps its quote part alone, trimmed.
@@ -231,6 +245,8 @@ fn at_a_held_lines_text_start_the_line_left_keeps_its_quote_part() {
         ("- a\n  |b", "- a\n\n  |b"),
         ("> - a\n>   |b", "> - a\n>\n>   |b"),
         ("> > - a\n> >   |b", "> > - a\n> >\n> >   |b"),
+        ("> - a\n|b", "> - a\n>\n>   |b"),
+        ("- a\n|b", "- a\n\n  |b"),
     ]);
 }
 
@@ -273,6 +289,14 @@ fn a_quote_line_continues_its_quote() {
         ("  > a|", "  > a\n  > |"),
         ("> a\nb|", "> a\nb\n> |"),
         ("> > a\nb|", "> > a\nb\n> > |"),
+        // A lazy line shows no `>`; the line left takes the quote's.
+        ("> a\n|b", "> a\n>\n> |b"),
+        ("> > a\n|b", "> > a\n> >\n> > |b"),
+    ]);
+    // A lazy line below a blank new line takes the quote's `>`, so it stays in the quote.
+    check(&[
+        ("> a|\nz", "> a\n> |\n> z"),
+        ("> a\nb|\nz", "> a\nb\n> |\n> z"),
     ]);
 }
 
@@ -297,7 +321,7 @@ fn before_a_text_start_the_plain_key_goes_in() {
 /// An item that is no gutter item lies past the outer item's text start.
 #[test]
 fn a_line_holding_an_opener_past_its_text_start_takes_the_plain_key() {
-    for case in ["- > - a|", "- > a|", "- a\n\n  > b|"] {
+    for case in ["- > - a|", "- > a|", "- a\n\n  > b|", "> - > - a|"] {
         assert_eq!(enter(case), None, "{case:?}");
     }
 }
@@ -307,6 +331,37 @@ fn a_plain_line_takes_the_plain_key() {
     for case in ["a|", "a\nb|", "# a|", "a\n\n|"] {
         assert_eq!(enter(case), None, "{case:?}");
     }
+}
+
+/// A marker in front matter or an HTML block is no markdown marker (D8).
+#[test]
+fn a_marker_in_a_skipped_range_takes_the_plain_key() {
+    for case in ["---\ntags:\n  - |\n---\nbody", "<div>\n- |\n</div>"] {
+        assert_eq!(enter(case), None, "{case:?}");
+    }
+}
+
+/// Rule 3 reads an indented code block on a marker line as it reads a fence: accepted, rare.
+#[test]
+fn indented_code_on_a_marker_line_opens_a_line_at_the_item_text() {
+    check(&[("-     code|", "-     code\n  |")]);
+}
+
+/// With no width shift, the walk over the lines the new item takes stops at the first one.
+#[test]
+fn a_continuation_with_no_shift_reads_one_moved_line() {
+    for case in [
+        "- a|\n  b\n  c\n  d\n  e",
+        "- a|\nb\nc\nd",
+        "- a|\n  - b\n  - c\n  - d",
+    ] {
+        MOVED_READ.set(0);
+        enter(case);
+        assert_eq!(MOVED_READ.get(), 1, "{case:?}");
+    }
+    MOVED_READ.set(0);
+    enter("9. a|\n   b\n   c");
+    assert_eq!(MOVED_READ.get(), 2, "a shift reads every line");
 }
 
 /// No `↩` parses the note; the fallback reads the caret's line once at most.

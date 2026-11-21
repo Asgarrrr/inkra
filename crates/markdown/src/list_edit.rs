@@ -89,6 +89,36 @@ impl<'m> Line<'m> {
     fn is_blank(&self, text: &str) -> bool {
         self.lead_end(text) == self.range.end
     }
+
+    /// Whether it continues the paragraph above only by laziness: no item opens on it, and it shows
+    /// fewer `>` than it is in, or starts left of its holder's content column. A blank line above
+    /// it would end that paragraph, and the line with it.
+    fn is_lazy(&self, text: &str, markdown: &Markdown) -> bool {
+        let gutter = self.gutter;
+        let marked = gutter
+            .and_then(|gutter| gutter.item.as_ref())
+            .is_some_and(|item| item.marked);
+        let column = self.column(text, self.lead_end(text));
+        !marked
+            && !self.is_blank(text)
+            && (gutter.is_some_and(|gutter| gutter.quotes.len() < gutter.depth)
+                || holder(text, markdown, self.range.start)
+                    .is_some_and(|at| column < content_column(text, markdown, at)))
+    }
+
+    /// The line below, its container prefix to `column` in place of its leading blanks when it is
+    /// lazy: a line `↩` leaves blank above it would end its paragraph (D2, rules 2, 6 and 8).
+    fn lazy_below(&self, text: &str, markdown: &Markdown, column: usize) -> Option<Hunk> {
+        let below = Line::at(
+            text,
+            markdown,
+            (self.range.end < text.len()).then_some(self.range.end + 1)?,
+        );
+        below.is_lazy(text, markdown).then(|| {
+            let prefix = container_prefix(text, markdown, below.range.start, column);
+            hunk(below.range.start..below.lead_end(text), prefix)
+        })
+    }
 }
 
 /// The lines from the line start `from` that start before `end`.
