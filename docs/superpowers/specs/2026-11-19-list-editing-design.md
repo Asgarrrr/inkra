@@ -608,8 +608,8 @@ job (`items.rs:285-290`).
   the note: no command verifies its edit by parsing a copy, unlike `⌘L`. The fallback (D8) is one
   pass over the caret's line, only where no item opens.
 - Finding the caret item costs two binary searches. A sibling, parent or holder costs the depth.
-- `↩` writes O(line) bytes, plus the lines that move. With no width shift, it reads one line below
-  the caret item's marker line, not the item's whole block. `⇥` and `⇧⇥` cost the moved blocks' lines.
+- `↩` writes O(line) bytes, plus the lines that move. With no width shift, it reads the lines below
+  the caret item's marker line up to the first non-blank one, not the item's whole block. `⇥` and `⇧⇥` cost the moved blocks' lines.
   Renumbering and the width shift cost the edited list's later siblings and their lines.
 - The edit then reparses once through `refresh`, as any keystroke does.
 - `Item` grows `Structure::items` from 8 to 32 bytes per item, filled in the existing pass. No
@@ -782,7 +782,8 @@ markdown mutants on the diff (CLAUDE.md, Commands).
 
 ## Known limits
 
-Accepted as rare by the L1 review (2026-11-21); the `↩` property skips them.
+Accepted as rare by the L1 review (2026-11-21). The `↩` property skips the first two; its
+generator never writes the last two.
 
 - A blank line written right under an empty marker line, by rule 7's blank-line form or rule 2 at a
   text start, ends that item before the lines it held: `> - \n>   1. |a` turns `1. a` into a
