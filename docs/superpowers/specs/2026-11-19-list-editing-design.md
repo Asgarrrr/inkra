@@ -788,7 +788,8 @@ Accepted as rare by the L1 review (2026-11-21); the `↩` property skips them.
   text start, ends that item before the lines it held: `> - \n>   1. |a` turns `1. a` into a
   sibling list.
 - Quoted indented code that no item holds loses its code indent under rule 2: the parse records a
-  leaf text start only while a list is open (task boxes spec, D11), so `>     x|` gives `>\n> `.
+  leaf text start only while a list is open (task boxes spec, D11), so `>     x|` gives
+  `>     x\n> |`, a paragraph line after the code.
 - In L1, `↩` on a nested empty item on the same line as its parent, `- - |`, deletes the whole item
   part, the parent's marker included. L2's D3 nested case replaces it.
 - Rule 3 fires on an indented code block that opens on a marker line (D2, rule 3).
