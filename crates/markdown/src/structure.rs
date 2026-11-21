@@ -13,8 +13,8 @@ use crate::spans::{line_start, to_offsets};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Structure {
-    /// Each list item's marker, the bullet or the first digit, in document order.
-    pub items: Vec<ByteOffset>,
+    /// Each list item, in document order.
+    pub items: Vec<Item>,
     /// Each block quote's start, where pulldown-cmark starts its range, in document order.
     pub quotes: Vec<ByteOffset>,
     /// Each code block, front matter, table, HTML block and ATX heading, from its first line's
@@ -23,18 +23,53 @@ pub struct Structure {
     pub skipped: Vec<Range<ByteOffset>>,
 }
 
+/// A list item as the list commands read it (list editing spec, D1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Item {
+    /// Its marker, the bullet or the first digit.
+    pub marker: ByteOffset,
+    /// Its range's end without its last line ending: its block holds the lines that start before
+    /// it.
+    pub end: ByteOffset,
+    /// Its parent item's index in `Structure::items`; `None` for a top-level item.
+    pub parent: Option<u32>,
+    /// Its list: the index of its `Start(List)` among the note's lists, in document order.
+    pub list: u32,
+}
+
 /// Fills a `Structure` from the parse's events, one call per element it opens.
 #[derive(Default)]
 pub(crate) struct Collector {
     structure: Structure,
+    /// Each open item's index and range end, innermost last.
+    items: Vec<(u32, usize)>,
+    /// Each open list's index and range end, innermost last.
+    lists: Vec<(u32, usize)>,
+    /// The lists opened so far.
+    opened: u32,
 }
 
 impl Collector {
     pub(crate) fn start(&mut self, text: &str, tag: &Tag<'_>, range: &Range<usize>) {
         match tag {
+            // A range can start on the line before; its marker cannot.
+            Tag::List(_) => {
+                close(&mut self.lists, marker_start(text, range.start));
+                self.lists.push((self.opened, range.end));
+                self.opened += 1;
+            }
             Tag::Item => {
                 let marker = marker_start(text, range.start);
-                self.structure.items.push(ByteOffset::new(marker));
+                close(&mut self.items, marker);
+                close(&mut self.lists, marker);
+                let index = u32::try_from(self.structure.items.len()).unwrap_or(u32::MAX);
+                self.structure.items.push(Item {
+                    marker: ByteOffset::new(marker),
+                    end: ByteOffset::new(without_line_ending(text, range).end),
+                    parent: self.items.last().map(|&(parent, _)| parent),
+                    list: self.lists.last().map_or(0, |&(list, _)| list),
+                });
+                self.items.push((index, range.end));
             }
             Tag::BlockQuote(_) => {
                 self.structure.quotes.push(ByteOffset::new(range.start));
@@ -50,8 +85,8 @@ impl Collector {
         }
     }
 
-    /// Each item's marker so far, in document order.
-    pub(crate) fn items(&self) -> &[ByteOffset] {
+    /// Each item so far, in document order.
+    pub(crate) fn items(&self) -> &[Item] {
         &self.structure.items
     }
 
@@ -86,7 +121,18 @@ pub(crate) fn innermost_item(text: &str) -> Option<usize> {
             collector.start(text, tag, &range);
         }
     }
-    collector.structure.items.last().map(|marker| marker.get())
+    collector
+        .structure
+        .items
+        .last()
+        .map(|item| item.marker.get())
+}
+
+/// Drops the open elements that end at or before `at`.
+fn close(open: &mut Vec<(u32, usize)>, at: usize) {
+    while open.last().is_some_and(|&(_, end)| end <= at) {
+        open.pop();
+    }
 }
 
 #[cfg(test)]

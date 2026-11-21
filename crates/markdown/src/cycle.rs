@@ -118,11 +118,12 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let items = &markdown.structure.items;
-    let innermost = items[..items.partition_point(|marker| (..line.end).contains(&marker.get()))]
+    let innermost = items[..items.partition_point(|item| item.marker.get() < line.end)]
         .last()
-        .filter(|marker| marker.get() >= line.start);
+        .map(|item| item.marker.get())
+        .filter(|&marker| marker >= line.start);
     let splices: Vec<(usize, &str)> = if let Some(marker) = innermost {
-        vec![checkbox_at(text, line.start, marker.get())]
+        vec![checkbox_at(text, line.start, marker)]
     } else {
         let lead = line_start_prefix(text, &line);
         fallback(text, &line, lead)
@@ -211,8 +212,13 @@ fn landed(text: &str, before: &Structure, cycled: &[Cycled], checked: bool) -> V
         })
         .collect();
     let after = &parsed.structure;
-    let items = moved(before.items.iter().map(|item| item.get()), &hunks)
-        .filter(|&(_, to)| after.items.binary_search(&ByteOffset::new(to)).is_err());
+    let items =
+        moved(before.items.iter().map(|item| item.marker.get()), &hunks).filter(|&(_, to)| {
+            after
+                .items
+                .binary_search_by_key(&ByteOffset::new(to), |item| item.marker)
+                .is_err()
+        });
     let quotes = before.quotes.iter().map(|quote| quote.get());
     let quotes = moved(quotes, &hunks)
         .filter(|&(_, to)| after.quotes.binary_search(&ByteOffset::new(to)).is_err());

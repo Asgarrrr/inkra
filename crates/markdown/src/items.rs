@@ -7,6 +7,7 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Tag, TagEnd};
 
 use crate::Conceal;
+use crate::structure::Item;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
 use crate::spans::{line_end, line_start, to_offsets};
 use walk::{Held, Walk};
@@ -160,14 +161,14 @@ impl Items {
     }
 
     /// The gutters, each held line's item part after its quote part, and what the parse keeps
-    /// beside them. `quotes` are the leading quotes' ranges, `items` every item's marker and
+    /// beside them. `quotes` are the leading quotes' ranges, `items` every item and
     /// `blocks` every code block's range without its last `\n`, all in document order. One walk,
     /// after the parse's one pass, so every width key is final (D1).
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
-        items: &[ByteOffset],
+        items: &[Item],
         blocks: impl Iterator<Item = Range<usize>>,
     ) -> ItemGutters {
         let quote_lines = quote_gutters(text, quotes);
@@ -184,9 +185,9 @@ impl Items {
         // The first line past the last marker line.
         let mut next = 0;
         while let Some(first) = rest.first() {
-            let marker = items[first.marker].get();
+            let marker = items[first.marker].marker.get();
             let line = line_start(text, marker);
-            let on_line = |item: &&Record| line_start(text, items[item.marker].get()) == line;
+            let on_line = |item: &&Record| line_start(text, items[item.marker].marker.get()) == line;
             // `first` opens on the line, so `opening` holds at least it.
             let count = 1 + rest[1..].iter().take_while(on_line).count();
             let (opening, after) = rest.split_at(count);
@@ -208,7 +209,7 @@ impl Items {
             );
             let item = self.item_part(gutter.range.end, &walk.held, opening, &mut walk.keys);
             let end = item.task.as_ref().map_or_else(
-                || marker_end(text, items[last.marker].get()),
+                || marker_end(text, items[last.marker].marker.get()),
                 |task| task.checkbox.end.get(),
             );
             let blank = matches!(text.as_bytes().get(end), Some(b' ' | b'\t'));

@@ -25,5 +25,5 @@ pub use markup::markup;
 pub use parse::{CodeBlock, Heading, Markdown, Span, parse};
 pub use pulldown_cmark::HeadingLevel;
 pub use reveal::{Conceal, is_active, touched};
-pub use structure::Structure;
+pub use structure::{Item, Structure};
 pub use styles::{HEADING_LEVELS, Styles};

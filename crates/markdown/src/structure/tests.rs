@@ -5,7 +5,15 @@ use crate::parse;
 /// Each item's marker.
 fn items(text: &str) -> Vec<usize> {
     let items = parse(text).structure.items.into_iter();
-    items.map(ByteOffset::get).collect()
+    items.map(|item| item.marker.get()).collect()
+}
+
+/// Each item's marker, end, parent and list.
+fn tree(text: &str) -> Vec<(usize, usize, Option<u32>, u32)> {
+    let items = parse(text).structure.items.into_iter();
+    items
+        .map(|item| (item.marker.get(), item.end.get(), item.parent, item.list))
+        .collect()
 }
 
 fn quotes(text: &str) -> Vec<usize> {
@@ -37,6 +45,44 @@ fn an_item_holds_its_marker() {
     ] {
         assert_eq!(items(text), want, "{text:?}");
     }
+}
+
+/// A child's parent is the item it nests in; an item ends before its last line ending, so the
+/// last line's added `\n` reaches no offset.
+#[test]
+fn an_item_knows_its_end_its_parent_and_its_list() {
+    assert_eq!(
+        tree("- a\n  - b\n- c"),
+        vec![(0, 9, None, 0), (6, 9, Some(0), 1), (10, 13, None, 0)]
+    );
+    assert_eq!(
+        tree("- a\nb\n\n  1. c\n"),
+        vec![(0, 13, None, 0), (9, 13, Some(0), 1)]
+    );
+}
+
+/// Siblings share a list, not merely a parent: a block between two items, or a quote ending,
+/// starts a new list.
+#[test]
+fn a_block_between_items_starts_a_new_list() {
+    let lists = |text| {
+        tree(text)
+            .into_iter()
+            .map(|item| item.3)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(lists("1. a\n\npara\n\n2. x"), vec![0, 1]);
+    assert_eq!(lists("> - a\n\n- b"), vec![0, 1]);
+    assert_eq!(lists("- a\n* b\n- c"), vec![0, 1, 2]);
+    assert_eq!(lists("- a\n  - b\n- c\n  - d"), vec![0, 1, 0, 2]);
+}
+
+/// A tab's leftover columns start the range on the line before; the item still nests by its
+/// marker.
+#[test]
+fn an_item_starting_its_range_early_still_nests_by_its_marker() {
+    let parents = tree("- a\n\n  -\t  b").into_iter().map(|item| item.2);
+    assert_eq!(parents.collect::<Vec<_>>(), vec![None, Some(0)]);
 }
 
 #[test]
