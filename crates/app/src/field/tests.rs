@@ -2,10 +2,10 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{Entity, Focusable, Subscription, TestAppContext, VisualTestContext, point, px, size};
-use inkra_markdown::Markdown;
 use inkra_text::ByteOffset;
 
 use super::{BlockScrolls, Cancelled, Confirmed, Edited, LayoutInputs, NameField, shape_document};
+use crate::decorations::Drawn;
 use crate::keymap::key_bindings;
 use crate::text_input::InputHost;
 use crate::text_input::painted_caret;
@@ -162,7 +162,7 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
             let style = window.text_style();
             let inputs = LayoutInputs {
                 buffer: field.input().buffer().read(cx),
-                markdown: &Markdown::default(),
+                markdown: &Rc::default(),
                 selection: &field.input().state().selection().range(),
                 marked: marked.as_ref(),
                 style: &style,
@@ -171,6 +171,7 @@ fn a_one_line_layout_hit_tests_the_field_like_the_editor(cx: &mut TestAppContext
                 code_block_wrap: false,
                 theme: builtin::dark(),
                 scrolls: &BlockScrolls::default(),
+                decorations: Drawn::default(),
             };
             let layout = shape_document(&inputs, None, window);
 

@@ -28,11 +28,15 @@ actions!(
 pub(crate) fn on_actions<V: InputHost>(div: Div, cx: &mut Context<V>) -> Div {
     div.on_action(cx.listener(|view: &mut V, _: &Backspace, window, cx| {
         let now = Instant::now();
-        view.edit_buffer(window, cx, |state, buffer| state.backspace(buffer, now));
+        let snap = view.snap();
+        view.edit_buffer(window, cx, |state, buffer| {
+            state.backspace(buffer, now, snap);
+        });
     }))
     .on_action(cx.listener(|view: &mut V, _: &Delete, window, cx| {
         let now = Instant::now();
-        view.edit_buffer(window, cx, |state, buffer| state.delete(buffer, now));
+        let snap = view.snap();
+        view.edit_buffer(window, cx, |state, buffer| state.delete(buffer, now, snap));
     }))
     .on_action(cx.listener(|view: &mut V, _: &Left, window, cx| {
         move_by(view, LogicalMovement::Left, false, window, cx);
@@ -70,8 +74,9 @@ fn move_by<V: InputHost>(
     window: &mut Window,
     cx: &mut Context<V>,
 ) {
+    let snap = view.snap();
     view.move_cursor(window, cx, |state, buffer| {
-        state.move_(buffer, movement, extend);
+        state.move_(buffer, movement, extend, snap);
     });
 }
 
@@ -97,7 +102,8 @@ fn to_row_edge<V: InputHost>(
         RowEdge::Start => *row.start(),
         RowEdge::End => *row.end(),
     };
+    let snap = view.snap();
     view.move_cursor(window, cx, |state, buffer| {
-        state.move_to(buffer, target, false);
+        state.move_to(buffer, target, false, snap);
     });
 }

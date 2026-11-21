@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gpui::{App, Global, Pixels, Point, WindowAppearance, point, px};
 use inkra_markdown::HeadingLevel;
 
-pub(crate) use colors::ThemeColors;
+pub(crate) use colors::{ColorToken, ThemeColors};
 pub(crate) use markdown::markdown_style;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +290,21 @@ pub(crate) const TAB_MIN_WIDTH: Pixels = px(28.);
 pub(crate) const DROP_EDGE: Pixels = px(2.);
 
 pub(crate) const QUOTE_BAR_WIDTH: Pixels = px(2.);
+
+/// A task's box, a square a little under the body text's 18 px (task boxes spec, D8).
+pub(crate) const TASK_BOX_SIZE: Pixels = px(16.);
+
+/// A task box's corners, mockup C's.
+pub(crate) const TASK_BOX_RADIUS: Pixels = px(4.);
+
+/// An open task box's outline, mockup C's.
+pub(crate) const TASK_BOX_BORDER: Pixels = px(1.5);
+
+/// The check inside a done task's box.
+pub(crate) const TASK_CHECK_SIZE: Pixels = px(12.);
+
+/// The space after a list slot's mark or box, mockup C's 10 px (task boxes spec, D8).
+pub(crate) const LIST_SLOT_GAP: Pixels = px(10.);
 
 #[cfg(test)]
 mod tests;

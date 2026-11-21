@@ -1,16 +1,19 @@
 //! A frame reuses the layout its inputs already produced (roadmap, "One shape per keystroke").
 
 use std::ops::Range;
+use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Pixels, TestAppContext, TextStyle, Window, WindowAppearance, prelude::*, px};
+use gpui::{Hsla, Pixels, TestAppContext, TextStyle, Window, WindowAppearance, prelude::*, px};
 use inkra_text::{Buffer, ByteOffset};
 
 use super::{at, dispatching, window_on, with_editor};
+use crate::decorations::{self, Drawn, MarkStyle};
 use crate::editor::layout::{
     BlockScrolls, DocumentLayout, LayoutInputs, line_shape_count, shape_count, shape_document,
 };
-use crate::theme::{self, Appearance, Theme, ThemeColors, builtin};
+use crate::feature::fakes::{self, TODO_LAYER};
+use crate::theme::{self, Appearance, ColorToken, Theme, ThemeColors, builtin};
 
 #[gpui::test]
 fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
@@ -21,6 +24,46 @@ fn a_keystroke_shapes_the_note_once(cx: &mut TestAppContext) {
     cx.simulate_input("x");
     cx.run_until_parked();
     assert_eq!(shape_count() - before, 1);
+}
+
+/// The listener publishes inside the keystroke's one shape, or the typed byte would draw plain.
+#[gpui::test]
+fn a_keystroke_shapes_the_note_once_with_a_layer(cx: &mut TestAppContext) {
+    let (window, mut cx) = dispatching(cx, "TODO\n");
+    let _listening = cx.update(|_, cx| {
+        fakes::declare_todo(cx);
+        // One mark over the whole text, so each keystroke changes the marks.
+        let whole = |buffer: &gpui::Entity<Buffer>, _, cx: &mut gpui::App| {
+            let (len, mark) = (buffer.read(cx).len(), buffer.read(cx).edit_mark());
+            let warning = MarkStyle {
+                color: Some(ColorToken::Warning),
+            };
+            let marks = vec![(at(0)..len, warning)];
+            decorations::publish(
+                TODO_LAYER,
+                &buffer.downgrade(),
+                Vec::new(),
+                vec![(at(0)..len, 0, marks)],
+                mark,
+                cx,
+            );
+        };
+        decorations::listen(TODO_LAYER, Rc::new(whole), cx)
+    });
+    cx.simulate_keystrokes("cmd-up");
+    cx.run_until_parked();
+
+    let before = shape_count();
+    cx.simulate_input("x");
+    cx.run_until_parked();
+    assert_eq!(shape_count() - before, 1);
+    window
+        .update(&mut cx, |view, _, cx| {
+            let warning = Hsla::from(theme::current(cx).colors.warning);
+            let runs = view.input.last_layout().unwrap().run_colors(0);
+            assert_eq!(runs, [(5, warning)]);
+        })
+        .unwrap();
 }
 
 #[gpui::test]
@@ -62,7 +105,7 @@ fn joining_two_lines_hands_only_the_joined_line_to_shape_text(cx: &mut TestAppCo
     assert_eq!(line_shape_count() - before, 1);
 }
 
-/// `text` shaped from scratch, or carrying what it can from `previous`.
+/// `text` in a buffer of its own, so `previous` carries no line.
 pub(super) fn shape(
     text: &str,
     marked: Option<&Range<ByteOffset>>,
@@ -70,11 +113,34 @@ pub(super) fn shape(
     previous: Option<&DocumentLayout>,
     window: &mut Window,
 ) -> DocumentLayout {
-    let buffer = Buffer::new(text);
-    let markdown = inkra_markdown::parse(text);
+    layout_of(&Buffer::new(text), marked, wrap_width, previous, window)
+}
+
+/// `buffer` brought to `text` through a diff, as a reload does, so `previous` can carry lines.
+pub(super) fn reshape(
+    buffer: &mut Buffer,
+    text: &str,
+    marked: Option<&Range<ByteOffset>>,
+    wrap_width: Option<Pixels>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    let diff = inkra_text::diff(buffer.version(), buffer.text(), text);
+    assert!(buffer.apply_diff(&diff));
+    layout_of(buffer, marked, wrap_width, previous, window)
+}
+
+pub(super) fn layout_of(
+    buffer: &Buffer,
+    marked: Option<&Range<ByteOffset>>,
+    wrap_width: Option<Pixels>,
+    previous: Option<&DocumentLayout>,
+    window: &mut Window,
+) -> DocumentLayout {
+    let markdown = Rc::new(inkra_markdown::parse(buffer.text()));
     let style = window.text_style();
     let inputs = LayoutInputs {
-        buffer: &buffer,
+        buffer,
         markdown: &markdown,
         selection: &(at(0)..at(0)),
         marked,
@@ -84,6 +150,7 @@ pub(super) fn shape(
         code_block_wrap: false,
         theme: builtin::dark(),
         scrolls: &BlockScrolls::default(),
+        decorations: Drawn::default(),
     };
     shape_document(&inputs, previous, window)
 }
@@ -97,8 +164,16 @@ fn a_carried_line_matches_a_fresh_shape(cx: &mut TestAppContext) {
     ];
     with_editor(cx, "", |_, window, _| {
         for (before, after, wrap_before, wrap_after) in cases {
-            let previous = shape(before, None, wrap_before, None, window);
-            let carried = shape(after, None, wrap_after, Some(&previous), window);
+            let mut buffer = Buffer::new(before);
+            let previous = layout_of(&buffer, None, wrap_before, None, window);
+            let carried = reshape(
+                &mut buffer,
+                after,
+                None,
+                wrap_after,
+                Some(&previous),
+                window,
+            );
             let fresh = shape(after, None, wrap_after, None, window);
 
             assert_eq!(carried.row_count(), fresh.row_count(), "{after:?}");
@@ -118,9 +193,16 @@ fn a_carried_line_matches_a_fresh_shape(cx: &mut TestAppContext) {
 fn a_composition_reshapes_only_its_line(cx: &mut TestAppContext) {
     let text = "zero\none two\nthree";
     with_editor(cx, "", |_, window, _| {
-        let previous = shape(text, None, None, None, window);
+        let buffer = Buffer::new(text);
+        let previous = layout_of(&buffer, None, None, None, window);
         let before = line_shape_count();
-        shape(text, Some(&(at(5)..at(8))), None, Some(&previous), window);
+        layout_of(
+            &buffer,
+            Some(&(at(5)..at(8))),
+            None,
+            Some(&previous),
+            window,
+        );
         assert_eq!(line_shape_count() - before, 1);
     });
 }
@@ -237,6 +319,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     code_block_wrap: false,
                     theme: builtin::dark(),
                     scrolls: &BlockScrolls::default(),
+                    decorations: Drawn::default(),
                 })
             };
             // `last_layout` still holds the end-of-document caret the window opened with.
@@ -261,6 +344,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     code_block_wrap: false,
                     theme: builtin::dark(),
                     scrolls: &BlockScrolls::default(),
+                    decorations: Drawn::default(),
                 })
             };
             assert!(!other(&bigger), "another style");
@@ -277,6 +361,7 @@ fn a_layout_is_reused_only_for_inputs_that_shape_it_alike(cx: &mut TestAppContex
                     code_block_wrap,
                     theme: builtin::dark(),
                     scrolls: &BlockScrolls::default(),
+                    decorations: Drawn::default(),
                 })
             };
             assert!(other_wrap(false), "the same code block wrap");

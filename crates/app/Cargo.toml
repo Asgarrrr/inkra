@@ -6,6 +6,15 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+# Else `cargo bench` forwards criterion flags like `--quick` to the lib and the bin, which fail.
+[lib]
+bench = false
+
+[[bin]]
+name = "inkra-app"
+path = "src/main.rs"
+bench = false
+
 [features]
 # Off-screen shots; `gpui_platform/test-support` gates the capture itself (offscreen-shots spec).
 shot = [
@@ -14,10 +23,18 @@ shot = [
     "inkra-vault/test-support",
 ]
 
+# `benches/layout.rs`: gpui's bench harness, and the gated `bench` module it drives.
+bench = ["gpui/bench-support", "gpui_platform/bench-support"]
+
 # `cargo test` compiles examples, and this one names a gated module.
 [[example]]
 name = "shot"
 required-features = ["shot"]
+
+[[bench]]
+name = "layout"
+harness = false
+required-features = ["bench"]
 
 [dependencies]
 inkra-text = { workspace = true }
@@ -27,6 +44,7 @@ inkra-markdown = { workspace = true }
 inkra-index = { workspace = true }
 inkra-tabs = { workspace = true }
 inkra-layout = { workspace = true }
+inkra-highlight = { workspace = true }
 # `block_on` before a gpui executor exists; `mpsc` and `oneshot` channels, `lock::Mutex`, `select_biased!`, `join_all`.
 futures = { workspace = true }
 # Wrap snapping per line.
@@ -62,6 +80,8 @@ gpui = { git = "https://github.com/zed-industries/zed", rev = "a1f2e21c2c95c6679
 inkra-vault = { workspace = true, features = ["test-support"] }
 # For the scroll geometry and the index's snapshot diff: pure logic, no window.
 proptest = { workspace = true }
+# `#[gpui::bench]` expands to `criterion` paths.
+criterion = { workspace = true }
 
 [lints]
 workspace = true

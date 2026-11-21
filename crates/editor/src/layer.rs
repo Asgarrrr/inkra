@@ -1,0 +1,319 @@
+use std::num::TryFromIntError;
+use std::ops::Range;
+
+use inkra_text::{Buffer, ByteOffset, EditMark, Splice};
+
+mod cursor;
+mod heard;
+mod map;
+
+use cursor::Cursor;
+pub use heard::{HeardLayer, TextChange};
+use map::{follow_all, map_chunk};
+
+/// A layer could not follow the buffer's edits and holds nothing until it is published again.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Lost;
+
+/// A feature's styled ranges over one buffer, published chunk by chunk.
+pub struct Layer<S> {
+    at: EditMark,
+    /// Sorted, disjoint and non-empty.
+    chunks: Vec<Chunk<S>>,
+}
+
+struct Chunk<S> {
+    start: ByteOffset,
+    len: usize,
+    /// The edit mark its marks were computed at: an older publish never replaces them.
+    published: EditMark,
+    /// What its publisher passed, opaque here; `None` once a splice changed its bytes or a publish
+    /// cut it.
+    tag: Option<u64>,
+    /// Relative to `start`: sorted, disjoint, non-empty and inside `0..len`.
+    marks: Box<[Mark<S>]>,
+}
+
+struct Mark<S> {
+    start: u32,
+    end: u32,
+    style: S,
+}
+
+/// A chunk as `Layer::publish` takes it: its range, its tag and the marks inside it.
+type Published<S> = (Range<ByteOffset>, u64, Vec<(Range<ByteOffset>, S)>);
+
+impl<S: Clone + PartialEq> Layer<S> {
+    #[must_use]
+    pub fn new(at: EditMark) -> Self {
+        Self {
+            at,
+            chunks: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn at(&self) -> EditMark {
+        self.at
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    /// Whether it holds chunks and stands at an edit mark other than `mark`.
+    #[must_use]
+    pub fn trails(&self, mark: EditMark) -> bool {
+        !self.is_empty() && self.at != mark
+    }
+
+    pub fn clear(&mut self) {
+        self.chunks.clear();
+    }
+
+    /// The marks intersecting `range`, clipped to it, in order.
+    pub fn marks_in(
+        &self,
+        range: Range<ByteOffset>,
+    ) -> impl Iterator<Item = (Range<ByteOffset>, &S)> + '_ {
+        let first = self
+            .chunks
+            .partition_point(|chunk| chunk.end() <= range.start);
+        // An empty range intersects nothing, not even a mark around it.
+        let chunks = if range.is_empty() {
+            &[]
+        } else {
+            &self.chunks[first..]
+        };
+        chunks
+            .iter()
+            .take_while(move |chunk| chunk.start < range.end)
+            .flat_map(move |chunk| chunk.marks_in(range.clone()))
+    }
+
+    /// Each chunk's range and tag, in order.
+    pub fn chunks(&self) -> impl Iterator<Item = (Range<ByteOffset>, Option<u64>)> + '_ {
+        self.chunks
+            .iter()
+            .map(|chunk| (chunk.start..chunk.end(), chunk.tag))
+    }
+
+    /// Brings the layer to `buffer`'s edit mark, shifting its marks through every splice since.
+    ///
+    /// # Errors
+    /// `Lost` when the buffer's log dropped a splice since: the layer is cleared.
+    pub fn catch_up(&mut self, buffer: &Buffer) -> Result<(), Lost> {
+        let Some(splices) = buffer.edits_since(self.at) else {
+            self.clear();
+            self.at = buffer.edit_mark();
+            return Err(Lost);
+        };
+        for splice in splices {
+            self.shift(splice);
+        }
+        self.at = buffer.edit_mark();
+        Ok(())
+    }
+
+    /// Maps the chunks `splice` reaches and moves the start of every chunk after them.
+    fn shift(&mut self, splice: Splice) {
+        let first = self
+            .chunks
+            .partition_point(|chunk| chunk.end() <= splice.at);
+        let last = self
+            .chunks
+            .partition_point(|chunk| chunk.start < splice.at + splice.removed_len);
+        let reached: Vec<_> = self
+            .chunks
+            .drain(first..last)
+            .filter_map(|chunk| map_chunk(chunk, splice))
+            .collect();
+        for chunk in &mut self.chunks[first..] {
+            chunk.start = chunk.start + splice.inserted_len - splice.removed_len;
+        }
+        self.chunks.splice(first..first, reached);
+    }
+
+    /// Empties each range of `removed`, then replaces everything inside each chunk of `chunks`, a
+    /// range with its tag and its marks. All are computed at the edit mark `at` and mapped through
+    /// the edits since (D6), except where a chunk computed later lies: that one stays. A chunk an
+    /// edit since reached lands nothing, as its marks are stale (code highlighting spec, S2b
+    /// deviation 1). Inside the batch, a later change wins over an earlier one. A chunk holds its
+    /// tag while it stays whole and its bytes unchanged. `Ok(Some(span))` when a change moved
+    /// marks: in `buffer`'s text, from the first to the last mark any change moved.
+    ///
+    /// # Errors
+    /// `Lost` when the layer could not catch up or the buffer's log dropped a splice since `at`:
+    /// the layer is cleared and the whole batch dropped.
+    ///
+    /// # Panics
+    /// If a range is reversed, a chunk's marks are unsorted, overlapping or outside it, or once
+    /// mapped, a range is past the end of `buffer` or a bound splits a char.
+    pub fn publish(
+        &mut self,
+        buffer: &Buffer,
+        removed: Vec<Range<ByteOffset>>,
+        chunks: Vec<Published<S>>,
+        at: EditMark,
+    ) -> Result<Option<Range<ByteOffset>>, Lost> {
+        for range in &removed {
+            check::<S>(range, &[]);
+        }
+        for (range, _, marks) in &chunks {
+            check(range, marks);
+        }
+        self.catch_up(buffer)?;
+        let Some(splices) = buffer.edits_since(at) else {
+            self.clear();
+            return Err(Lost);
+        };
+        if removed.is_empty() && chunks.is_empty() {
+            return Ok(None);
+        }
+        let splices: Vec<_> = splices.collect();
+        let removed = removed
+            .into_iter()
+            .map(|range| (Chunk::new(range, at, None, []), false));
+        let chunks = chunks
+            .into_iter()
+            .map(|(range, tag, marks)| (Chunk::new(range, at, Some(tag), marks), true));
+        let mut cursor = Cursor::new(std::mem::take(&mut self.chunks));
+        let span = removed
+            .chain(chunks)
+            .filter_map(|(new, fills)| {
+                let new = follow_all(new, &splices, fills)?;
+                new.check(buffer);
+                cursor.replace(new, fills)
+            })
+            .reduce(|span, range| span.start.min(range.start)..span.end.max(range.end));
+        self.chunks = cursor.finish();
+        Ok(span)
+    }
+}
+
+/// From the first to the last mark that differs between two sorted lists, `None` when they match.
+fn differing<S: PartialEq>(
+    before: &[(Range<ByteOffset>, S)],
+    after: &[(Range<ByteOffset>, S)],
+) -> Option<Range<ByteOffset>> {
+    let prefix = before
+        .iter()
+        .zip(after)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let (before, after) = (&before[prefix..], &after[prefix..]);
+    let behind = before.iter().rev().zip(after.iter().rev());
+    let suffix = behind.take_while(|(old, new)| old == new).count();
+    let (before, after) = (
+        &before[..before.len() - suffix],
+        &after[..after.len() - suffix],
+    );
+    let starts = before.first().into_iter().chain(after.first());
+    let ends = before.last().into_iter().chain(after.last());
+    Some(starts.map(|(mark, _)| mark.start).min()?..ends.map(|(mark, _)| mark.end).max()?)
+}
+
+impl<S> Chunk<S> {
+    fn end(&self) -> ByteOffset {
+        self.start + self.len
+    }
+}
+
+impl<S: Clone> Chunk<S> {
+    fn new(
+        range: Range<ByteOffset>,
+        published: EditMark,
+        tag: Option<u64>,
+        marks: impl IntoIterator<Item = (Range<ByteOffset>, S)>,
+    ) -> Self {
+        let start = range.start;
+        let marks: Result<Box<[_]>, _> = marks
+            .into_iter()
+            .filter(|(mark, _)| !mark.is_empty())
+            .map(|(mark, style)| Mark::new(start, mark, style))
+            .collect();
+        // A bound past `u32` from `start` drops all marks and the tag, so it is republished
+        // (decoration layer spec, deviation 17).
+        let (marks, tag) = marks.map_or_else(|_| (Box::default(), None), |marks| (marks, tag));
+        Self {
+            start,
+            len: range.end - start,
+            published,
+            tag,
+            marks,
+        }
+    }
+
+    /// As `Layer::marks_in`, for a non-empty `range`.
+    fn marks_in(&self, range: Range<ByteOffset>) -> impl Iterator<Item = (Range<ByteOffset>, &S)> {
+        let first = self
+            .marks
+            .partition_point(|mark| mark.range(self.start).end <= range.start);
+        self.marks[first..]
+            .iter()
+            .map(|mark| (mark.range(self.start), &mark.style))
+            .take_while(move |(mark, _)| mark.start < range.end)
+            .map(move |(mark, style)| (mark.start.max(range.start)..mark.end.min(range.end), style))
+    }
+
+    /// The part of the chunk inside `range`, `None` when empty; only the whole chunk keeps its tag.
+    fn piece(&self, range: Range<ByteOffset>) -> Option<Self> {
+        (range.start < range.end).then(|| {
+            let marks = self
+                .marks_in(range.clone())
+                .map(|(mark, style)| (mark, style.clone()));
+            let tag = self.tag.filter(|_| range == (self.start..self.end()));
+            Self::new(range, self.published, tag, marks)
+        })
+    }
+
+    fn check(&self, buffer: &Buffer) {
+        let chunk = self.start..self.end();
+        assert!(
+            chunk.end <= buffer.len(),
+            "chunk {chunk:?} is past the end of the buffer"
+        );
+        let marks = self
+            .marks
+            .iter()
+            .map(|mark| mark.range(self.start))
+            .flat_map(|mark| [mark.start, mark.end]);
+        for bound in [chunk.start, chunk.end].into_iter().chain(marks) {
+            assert!(
+                buffer.text().is_char_boundary(bound.get()),
+                "{bound} in chunk {chunk:?} splits a char"
+            );
+        }
+    }
+}
+
+impl<S> Mark<S> {
+    fn new(chunk: ByteOffset, mark: Range<ByteOffset>, style: S) -> Result<Self, TryFromIntError> {
+        Ok(Self {
+            start: u32::try_from(mark.start - chunk)?,
+            end: u32::try_from(mark.end - chunk)?,
+            style,
+        })
+    }
+
+    fn range(&self, chunk: ByteOffset) -> Range<ByteOffset> {
+        chunk + self.start as usize..chunk + self.end as usize
+    }
+}
+
+/// What holds of a publish at any edit mark; the bounds are checked once mapped (`Chunk::check`).
+fn check<S>(chunk: &Range<ByteOffset>, marks: &[(Range<ByteOffset>, S)]) {
+    assert!(chunk.start <= chunk.end, "chunk {chunk:?} is reversed");
+    let mut floor = chunk.start;
+    for (mark, _) in marks {
+        assert!(
+            [floor, mark.start, mark.end, chunk.end].is_sorted(),
+            "mark {mark:?} is reversed, overlaps the one before or lies outside chunk {chunk:?}"
+        );
+        floor = mark.end;
+    }
+}
+
+#[cfg(test)]
+mod tests;

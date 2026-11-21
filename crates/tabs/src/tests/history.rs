@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use proptest::prelude::*;
 
-use super::{Fake, Harness, Op, TabId, entries, ops, run, three};
-use crate::Stack;
+use super::{Fake, Harness, Op, TabId, entries, histories, ops, run, three};
+use crate::Way;
+use crate::history::Stack;
 
 fn fake(note: u8, seq: usize) -> Fake {
     Fake {
@@ -21,17 +22,17 @@ impl Harness {
             .find(|tab| tab.id == self.tabs.active())
             .unwrap();
         let [from, to] = if back {
-            [&tab.back, &tab.forward]
+            [Way::Back, Way::Forward]
         } else {
-            [&tab.forward, &tab.back]
+            [Way::Forward, Way::Back]
         };
-        [entries(from), entries(to)]
+        [from, to].map(|way| entries(tab.history.stack(way)))
     }
 
     pub(super) fn stacks(&self) -> HashMap<TabId, [Vec<Fake>; 2]> {
         self.tabs
             .iter()
-            .map(|tab| (tab.id, [entries(&tab.back), entries(&tab.forward)]))
+            .map(|tab| (tab.id, histories(&tab.history)))
             .collect()
     }
 }

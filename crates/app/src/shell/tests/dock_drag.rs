@@ -1,14 +1,16 @@
 //! Dragging a dock view: onto an icon, onto a dock column, onto nothing (docks spec, Drag).
 
 use gpui::{Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point, px};
-use inkra_layout::View;
 
 use super::dock_menu::{default_docks, docks};
 use super::dragging::drag;
 use super::edge_drops::hold;
 use super::splits::{centre, check_layout, close};
 use super::{ab_focused, editor_focused, open};
-use crate::shell::docks::{MoveBacklinksToOtherDock, MoveFilesToOtherDock};
+use crate::backlinks::BACKLINKS;
+use crate::backlinks::MoveBacklinksToOtherDock;
+use crate::shell::FILES;
+use crate::shell::docks::MoveFilesToOtherDock;
 
 #[gpui::test]
 fn dropping_an_icon_on_another_reorders_the_bar(cx: &mut TestAppContext) {
@@ -20,8 +22,8 @@ fn dropping_an_icon_on_another_reorders_the_bar(cx: &mut TestAppContext) {
     drag(&mut cx, "dock-icon-backlinks", "dock-icon-files");
 
     let [(views, active, _), _] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Backlinks, View::Files]);
-    assert_eq!(active, Some(View::Backlinks));
+    assert_eq!(views, [BACKLINKS, FILES]);
+    assert_eq!(active, Some(BACKLINKS));
 }
 
 #[gpui::test]
@@ -32,8 +34,8 @@ fn dropping_on_a_lone_icon_takes_its_place(cx: &mut TestAppContext) {
     drag(&mut cx, "dock-icon-files", "dock-icon-backlinks");
 
     let [_, (views, active, _)] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Files, View::Backlinks]);
-    assert_eq!(active, Some(View::Files));
+    assert_eq!(views, [FILES, BACKLINKS]);
+    assert_eq!(active, Some(FILES));
     assert!(cx.debug_bounds("dock-left").is_none());
 }
 
@@ -45,8 +47,8 @@ fn dropping_on_a_dock_body_appends(cx: &mut TestAppContext) {
     drag(&mut cx, "dock-icon-backlinks", "dock-left");
 
     let [(views, active, _), _] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Files, View::Backlinks]);
-    assert_eq!(active, Some(View::Backlinks));
+    assert_eq!(views, [FILES, BACKLINKS]);
+    assert_eq!(active, Some(BACKLINKS));
 }
 
 #[gpui::test]
@@ -83,8 +85,8 @@ fn an_emptied_dock_is_refilled_by_a_drop_on_its_strip(cx: &mut TestAppContext) {
     cx.run_until_parked();
 
     let [(views, active, shown), _] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Files]);
-    assert_eq!(active, Some(View::Files));
+    assert_eq!(views, [FILES]);
+    assert_eq!(active, Some(FILES));
     assert!(shown);
     assert!(cx.debug_bounds("dock-drop-left").is_none());
 }
@@ -129,7 +131,7 @@ fn a_view_dropped_in_the_strip_fills_the_dock_and_splits_nothing(cx: &mut TestAp
     cx.run_until_parked();
 
     let [_, (views, _, shown)] = docks(&window, &mut cx);
-    assert_eq!(views, [View::Backlinks]);
+    assert_eq!(views, [BACKLINKS]);
     assert!(shown);
     assert_eq!(centre(&window, &mut cx).len(), 1);
     check_layout(&window, &mut cx);

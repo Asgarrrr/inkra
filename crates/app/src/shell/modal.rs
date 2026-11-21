@@ -7,9 +7,9 @@ use gpui::{
 };
 
 use super::AppShell;
+use crate::feature::FeatureId;
 use crate::picker::{Dismissed, Picker, PickerDelegate};
-use crate::theme;
-use crate::ui::{ContextMenu, MenuClosed};
+use crate::ui::{ContextMenu, Elevation, MenuClosed, elevated};
 
 const MODAL_WIDTH: Pixels = px(600.);
 
@@ -22,6 +22,8 @@ pub(super) struct Modal {
     /// `None` centres a picker; a menu is anchored here.
     at: Option<Point<Pixels>>,
     subscriptions: Vec<Subscription>,
+    /// The feature that opened it: switching that feature off closes it.
+    pub(super) owner: Option<FeatureId>,
 }
 
 impl Modal {
@@ -65,6 +67,7 @@ impl AppShell {
             focus: focus.clone(),
             at: None,
             subscriptions: vec![dismissed],
+            owner: None,
         });
         window.focus(&focus, cx);
         cx.notify();
@@ -102,6 +105,7 @@ impl AppShell {
             focus: focus.clone(),
             at: Some(at),
             subscriptions: vec![closed],
+            owner: None,
         });
         window.focus(&focus, cx);
         cx.notify();
@@ -165,7 +169,6 @@ impl AppShell {
     /// A menu also closes on a right press outside, as macOS's do.
     pub(super) fn render_modal(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let modal = self.modal.as_ref()?;
-        let colors = theme::current(cx).colors;
         let overlay = div().absolute().inset_0().occlude().on_mouse_down(
             MouseButton::Left,
             cx.listener(|shell, _, window, cx| shell.dismiss_modal(window, cx)),
@@ -193,14 +196,7 @@ impl AppShell {
                     .flex()
                     .justify_center()
                     .child(
-                        div()
-                            .occlude()
-                            .w(MODAL_WIDTH)
-                            .bg(colors.elevated_background)
-                            .border_1()
-                            .border_color(colors.border)
-                            .rounded(theme::ELEVATED_RADIUS)
-                            .shadow_lg()
+                        elevated(div().occlude().w(MODAL_WIDTH), Elevation::High, cx)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .child(modal.view.clone()),
                     ),

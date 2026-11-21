@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use futures::FutureExt as _;
 use futures::channel::oneshot;
 
 use super::errors::io;
@@ -75,6 +76,14 @@ impl MemFs {
     pub fn block_load(&self, path: impl Into<PathBuf>) -> Gate {
         let (release, wait) = oneshot::channel();
         self.state().blocked_loads.insert(path.into(), wait);
+        Gate(release)
+    }
+
+    /// Parks every load of `path` until release, where `block_load` parks only the first:
+    /// the index's and an open's alike, whichever comes first.
+    pub fn hold_loads(&self, path: impl Into<PathBuf>) -> Gate {
+        let (release, wait) = oneshot::channel();
+        self.state().held_loads.insert(path.into(), wait.shared());
         Gate(release)
     }
 

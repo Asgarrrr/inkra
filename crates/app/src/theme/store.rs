@@ -8,7 +8,9 @@ use gpui::{AppContext as _, Context, SharedString, Task};
 use inkra_vault::{CONFIG_DIR, Fs, RelPath, VaultError};
 use serde_json::Value;
 
+pub(crate) use super::file::describe;
 use super::{Theme, builtin, file};
+use crate::settings::{self, Settings, Switches};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) enum Choice {
@@ -23,7 +25,7 @@ impl Choice {
     const SYSTEM: &str = "system";
 
     /// `theme` in `settings.json`; a missing one follows the system.
-    fn from_setting(name: Option<&str>) -> Self {
+    pub(crate) fn from_setting(name: Option<&str>) -> Self {
         match name {
             Some(name) if name != Self::SYSTEM => Self::Named(name.to_owned().into()),
             _ => Self::System,
@@ -45,6 +47,7 @@ pub(crate) struct Resolved {
     /// `None` follows the system.
     pub(crate) theme: Option<Arc<Theme>>,
     pub(crate) code_block_wrap: bool,
+    pub(crate) features: Option<Switches>,
     pub(crate) notices: Vec<String>,
 }
 
@@ -52,8 +55,10 @@ pub(crate) struct Resolved {
 #[derive(Default)]
 pub(crate) struct ThemeStore {
     choice: Choice,
-    /// Held: a newer reload or a pick drops it, so a stale one never lands.
+    /// Held: a newer reload drops it, so a stale one never lands.
     reload: Option<Task<()>>,
+    /// Picks so far: a reload that began before the latest one must not adopt its theme.
+    picks: u64,
     /// The vault's themes, listed before the picker opens.
     listing: Option<Task<()>>,
     /// The last write of the choice; the next one awaits it, so two picks land in order.
@@ -69,6 +74,10 @@ impl ThemeStore {
         self.choice = choice;
     }
 
+    pub(crate) fn picks(&self) -> u64 {
+        self.picks
+    }
+
     pub(crate) fn reload(&mut self, task: Task<()>) {
         self.reload = Some(task);
     }
@@ -77,7 +86,7 @@ impl ThemeStore {
         self.listing = Some(task);
     }
 
-    /// Adopts `choice` over any reload in flight, and writes it to `vault` after the previous write.
+    /// Adopts `choice` over the theme of any reload in flight, and writes it to `vault` after the previous write.
     pub(crate) fn pick<V: 'static>(
         &mut self,
         choice: Choice,
@@ -86,7 +95,7 @@ impl ThemeStore {
         failed: fn(&mut V, String, &mut Context<V>),
     ) {
         self.choice = choice.clone();
-        self.reload = None;
+        self.picks += 1;
         let Some((fs, root)) = vault else {
             return;
         };
@@ -124,7 +133,7 @@ impl ThemeStore {
 /// A vault can come from anywhere, and the first read runs before the window.
 const MAX_CONFIG_BYTES: u64 = 1 << 20;
 
-async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
+pub(crate) async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
     let bytes = fs.read_bytes(path, MAX_CONFIG_BYTES).await?;
     String::from_utf8(bytes).map_err(|_| VaultError::NotUtf8 {
         path: path.to_path_buf(),
@@ -135,7 +144,11 @@ async fn read_text(fs: &dyn Fs, path: &Path) -> inkra_vault::Result<String> {
 pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
     let config = root.join(CONFIG_DIR);
     let mut notices = Vec::new();
-    let (choice, code_block_wrap) = settings(fs, &config, &mut notices).await;
+    let Settings {
+        choice,
+        code_block_wrap,
+        features,
+    } = settings::read(fs, &config, &mut notices).await;
     let theme = match &choice {
         Choice::System => None,
         Choice::Named(name) => named(fs, &config, name, &mut notices).await,
@@ -144,36 +157,8 @@ pub(crate) async fn load(fs: &dyn Fs, root: &Path) -> Resolved {
         choice,
         theme,
         code_block_wrap,
+        features,
         notices,
-    }
-}
-
-/// The theme choice and `code_block_wrap`, from the one parse of `settings.json`.
-async fn settings(fs: &dyn Fs, config: &Path, notices: &mut Vec<String>) -> (Choice, bool) {
-    let text = match read_text(fs, &config.join("settings.json")).await {
-        Ok(text) => text,
-        Err(error) => {
-            if error.io_kind() != Some(ErrorKind::NotFound) {
-                notices.push(error.to_string());
-            }
-            return (Choice::System, false);
-        }
-    };
-    match serde_json::from_str::<Value>(&text) {
-        Ok(settings) => (
-            Choice::from_setting(settings.get("theme").and_then(Value::as_str)),
-            settings
-                .get("code_block_wrap")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        ),
-        Err(error) => {
-            notices.push(file::describe(
-                &format!("{CONFIG_DIR}/settings.json"),
-                &error,
-            ));
-            (Choice::System, false)
-        }
     }
 }
 

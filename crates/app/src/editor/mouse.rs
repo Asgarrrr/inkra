@@ -3,6 +3,7 @@ use gpui::{
     Pixels, Point, Window, px,
 };
 use inkra_markdown::{Link, links};
+use inkra_text::{Bias, ByteOffset, Diff};
 
 use super::{EditorView, LinkFollowed};
 use crate::open::Open;
@@ -31,6 +32,12 @@ impl EditorView {
             .min_by_key(|link| link.range.end - link.range.start)
     }
 
+    /// The flip of the task whose box the pointer is on, and its text start.
+    fn task_under(&self, position: Point<Pixels>) -> Option<(Diff, ByteOffset)> {
+        let (layout, local) = self.input.hit_test(position)?;
+        layout.task_at(local)
+    }
+
     pub(super) fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -42,7 +49,21 @@ impl EditorView {
             self.is_selecting = true;
             return;
         };
-        // Before `is_selecting`: a ⌘-click follows and must not start a drag selection.
+        // Before `is_selecting`, as a ⌘-click: a toggle starts no drag selection. `⌘` and `⇧` skip
+        // the box, to follow a link and extend the selection; a window's first click only activates it.
+        let snap = self.snap();
+        if !(event.modifiers.platform || event.modifiers.shift || event.first_mouse)
+            && let Some((flip, text_start)) = self.task_under(event.position)
+            && self.edit_buffer(window, cx, |state, buffer| {
+                let applied = state.apply_diff(buffer, &flip);
+                if applied {
+                    state.move_to(buffer, flip.map(text_start, Bias::Right), false, &snap);
+                }
+                applied
+            })
+        {
+            return;
+        }
         if event.modifiers.platform
             && let Some(link) = self.link_under(event.position, cx)
         {
@@ -60,7 +81,7 @@ impl EditorView {
         self.is_selecting = true;
         let extend = event.modifiers.shift;
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, offset, extend);
+            state.move_to(buffer, offset, extend, snap);
         });
     }
 
@@ -86,8 +107,9 @@ impl EditorView {
         let Some(offset) = self.input.offset_at(event.position) else {
             return;
         };
+        let snap = self.snap();
         self.move_cursor(window, cx, |state, buffer| {
-            state.move_to(buffer, offset, true);
+            state.move_to(buffer, offset, true, snap);
         });
     }
 

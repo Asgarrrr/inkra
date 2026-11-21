@@ -1,12 +1,14 @@
 //! The `⌘K` keys: a split in each direction, and focus to the neighbour (splits spec, P3).
 
 use gpui::{TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{Axis, GroupId, Member, Side, View};
+use inkra_layout::{Axis, GroupId, Member, Side};
 
 use super::splits::{centre, close, current, focused, last, shown_in};
 use super::{ab_focused, at, focus_tree, keys, open, select, tall_notes};
+use crate::backlinks::BACKLINKS;
+use crate::backlinks::MoveBacklinksToOtherDock;
 use crate::shell::AppShell;
-use crate::shell::docks::MoveBacklinksToOtherDock;
+use crate::shell::FILES;
 use crate::shell::split::{SplitDown, SplitRight};
 
 fn root_axis(window: &WindowHandle<AppShell>, cx: &mut VisualTestContext) -> Axis {
@@ -293,7 +295,7 @@ fn cmd_k_down_from_the_sidebar_splits_files_off(cx: &mut TestAppContext) {
     cx.dispatch_action(MoveBacklinksToOtherDock);
     window
         .update(&mut cx, |shell, window, cx| {
-            shell.reveal(View::Files, window, cx);
+            shell.reveal(FILES, window, cx);
         })
         .unwrap();
     cx.run_until_parked();
@@ -310,7 +312,7 @@ fn cmd_k_down_from_the_sidebar_splits_files_off(cx: &mut TestAppContext) {
                 .collect::<Vec<Vec<_>>>()
         })
         .unwrap();
-    assert_eq!(held, [vec![View::Backlinks], vec![View::Files]]);
+    assert_eq!(held, [vec![BACKLINKS], vec![FILES]]);
     assert_eq!(centre(&window, &mut cx).len(), 1);
     assert!(tree_focused(&window, &mut cx));
     close(&mut cx);

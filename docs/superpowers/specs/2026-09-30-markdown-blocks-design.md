@@ -1,8 +1,9 @@
 # Markdown blocks: quote bars, code backgrounds, task boxes
 
 Status: **S1 merged** (#56). S2 is superseded by
-`2026-11-07-code-blocks-design.md`. S3 refreshed 2026-11-11, see "S3 as
-planned"; not built.
+`2026-11-07-code-blocks-design.md`. S3 is superseded by
+`2026-11-16-task-boxes-design.md`; "S3 as
+planned" stays for its parser facts.
 
 ## Why
 
@@ -153,6 +154,9 @@ is the width of the gutter's source text shaped at the body size, measured
 once per line. A heading inside a quote is shaped larger, but its gutter
 matches the body lines around it, so bars of equal depth align. A lazy line
 takes the width and bar positions of the gutter above it.
+
+Superseded in a list item by task boxes D3 and D11 (`2026-11-16-task-boxes-design.md`): a lazy
+line carries the quote part only, takes its own item part, and starts at the item's text.
 
 **What paints in the gutter:**
 

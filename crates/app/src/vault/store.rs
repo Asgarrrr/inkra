@@ -1,14 +1,19 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{App, Context, Entity, Subscription, Task, prelude::*};
 use inkra_text::Buffer;
 use inkra_vault::{EntryId, Fs, Pending, Scans, Stamp, Vault, VaultError};
 
 use super::OpenFailed;
-use super::session::{Lifecycle, Location, OpenNote, Sessions};
+use super::moves::Moves;
+use super::session::{Lifecycle, Location, OpenNote, PendingSave, Sessions};
+use crate::decorations;
+
+/// A file's path and what reading it returned.
+pub(crate) type BytesRead = (PathBuf, inkra_vault::Result<Vec<u8>>);
 
 /// Periodic, not an idle debounce — a debounce never fires during one long session.
 pub(crate) const AUTOSAVE_DELAY: Duration = Duration::from_secs(2);
@@ -21,8 +26,7 @@ pub(crate) struct NoteStore {
     /// `Buffer::version` can't order writes: undo lowers it.
     next_write: u64,
     pub(super) scans: Scans,
-    /// Our own rename, until its rescan swaps in: `None` while `Fs::rename` runs, then the new path.
-    pub(super) moves: HashMap<EntryId, Option<PathBuf>>,
+    pub(super) moves: Moves,
     _watch: Option<Task<()>>,
     /// Why there is no watch; the shell takes it once, for the opening notice.
     unwatched: Option<VaultError>,
@@ -59,7 +63,7 @@ impl NoteStore {
             current: None,
             next_write: 0,
             scans: Scans::default(),
-            moves: HashMap::new(),
+            moves: Moves::default(),
             _watch: watch,
             unwatched,
             #[cfg(test)]
@@ -186,13 +190,18 @@ impl NoteStore {
             return Task::ready(None);
         };
         let fs = Arc::clone(&self.fs);
+        let openers = decorations::openers(cx);
 
         cx.spawn(async move |this, cx| {
-            let loaded = match cx
-                .background_spawn(async move { fs.load(&path).await })
+            let (loaded, opened) = match cx
+                .background_spawn(async move {
+                    let loaded = fs.load(&path).await?;
+                    let opened = decorations::run_openers(&loaded.text, &openers, Instant::now());
+                    Ok::<_, VaultError>((loaded, opened))
+                })
                 .await
             {
-                Ok(loaded) => loaded,
+                Ok(landed) => landed,
                 Err(error) => {
                     let _ = this.update(cx, |_, cx| cx.emit(OpenFailed { id, error }));
                     return None;
@@ -204,6 +213,7 @@ impl NoteStore {
                 if this.sessions.note(id).is_none() {
                     let stamp = loaded.stamp;
                     let buffer = cx.new(|_| Buffer::new(loaded.text));
+                    decorations::seed(&buffer, opened, cx);
                     this.track(id, buffer, Location::Vault, stamp, cx);
                     cx.notify();
                 }
@@ -213,6 +223,27 @@ impl NoteStore {
             })
             .ok()
             .flatten()
+        })
+    }
+
+    /// `id`'s bytes at its path when the read runs, behind every operation on its chain; `None`
+    /// when no path is safe.
+    pub(crate) fn read_bytes(
+        &mut self,
+        id: EntryId,
+        max_len: u64,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<BytesRead>> {
+        let fs = Arc::clone(&self.fs);
+        self.queue(id, PendingSave::Keep, cx, async move |this, cx| {
+            let path = this.update(cx, |this, cx| this.path_of(id, cx)).ok()??;
+            let read = cx
+                .background_spawn({
+                    let path = path.clone();
+                    async move { fs.read_bytes(&path, max_len).await }
+                })
+                .await;
+            Some((path, read))
         })
     }
 

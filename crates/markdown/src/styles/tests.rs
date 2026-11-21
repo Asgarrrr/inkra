@@ -35,6 +35,7 @@ fn a_heading_level_does_not_read_as_another_tag() {
             Styles::QUOTE,
             Styles::FRONTMATTER,
             Styles::CODE_BLOCK,
+            Styles::DONE,
         ] {
             assert!(!heading.contains(tag));
         }

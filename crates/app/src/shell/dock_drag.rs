@@ -5,11 +5,12 @@ use std::cmp::Ordering;
 use gpui::{
     Context, InteractiveElement, IntoElement, Pixels, Point, Render, Styled, Window, div, px,
 };
-use inkra_layout::{GroupId, Side, View};
+use inkra_layout::{GroupId, Side};
 
 use super::AppShell;
-use super::docks::{icon, title};
+use super::dock_chrome::{inward_border, name};
 use super::drop_marker;
+use crate::pane::PaneDecl;
 use crate::theme;
 use crate::ui::IconButton;
 
@@ -22,7 +23,7 @@ const DROP_STRIP_WIDTH: Pixels = px(40.);
 /// drag began.
 #[derive(Clone)]
 pub(super) struct DraggedView {
-    pub(super) view: View,
+    pub(super) decl: &'static PaneDecl,
     pub(super) index: usize,
     pub(super) group: GroupId,
 }
@@ -37,7 +38,7 @@ impl DraggedView {
 
 impl Render for DraggedView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        IconButton::new("dock-view-preview", icon(self.view), title(self.view)).toggled(true)
+        IconButton::new("dock-view-preview", self.decl.icon, self.decl.title).toggled(true)
     }
 }
 
@@ -71,14 +72,15 @@ impl AppShell {
         }
         let colors = theme::current(cx).colors;
         let strip = div().absolute().top_0().bottom_0();
-        let (strip, name) = match side {
-            Side::Left => (strip.left_0().border_r(theme::DROP_EDGE), "left"),
-            Side::Right => (strip.right_0().border_l(theme::DROP_EDGE), "right"),
+        let strip = match side {
+            Side::Left => strip.left_0(),
+            Side::Right => strip.right_0(),
         };
+        let side_name = name(side);
         Some(
-            strip
+            inward_border(strip, side, theme::DROP_EDGE)
                 .w(DROP_STRIP_WIDTH)
-                .debug_selector(move || format!("dock-drop-{name}"))
+                .debug_selector(move || format!("dock-drop-{side_name}"))
                 .group_drag_over::<DraggedView>(SHELL_GROUP, move |style| {
                     style.border_color(colors.border)
                 })
@@ -89,7 +91,7 @@ impl AppShell {
                 })
                 .on_drop(
                     cx.listener(move |shell, dragged: &DraggedView, window, cx| {
-                        shell.append(dragged.view, side, window, cx);
+                        shell.append(dragged.decl.id, side, window, cx);
                     }),
                 ),
         )

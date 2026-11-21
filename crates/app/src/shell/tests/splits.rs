@@ -176,7 +176,11 @@ fn a_press_in_a_group_activates_it(cx: &mut TestAppContext) {
     let sources = |window: &WindowHandle<AppShell>, cx: &mut VisualTestContext| {
         window
             .update(cx, |shell, _, cx| {
-                shell.panes().backlinks.read(cx).source_names()
+                shell
+                    .backlinks_panel()
+                    .expect("backlinks is active")
+                    .read(cx)
+                    .source_names()
             })
             .unwrap()
     };

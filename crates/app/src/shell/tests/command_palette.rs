@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use gpui::{Entity, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{Side, View};
+use inkra_layout::Side;
 use inkra_vault::mem_fs::MemFs;
 
 use super::{activate, editor, no_vault, showing, tab_files, tree_focused, two_notes, vault_names};
 use crate::Quit;
+use crate::shell::FILES;
 use crate::shell::{AppShell, NoteStore};
 use crate::sidebar::Sidebar;
 
@@ -103,9 +104,9 @@ fn choosing_move_files_moves_the_tree_right(cx: &mut TestAppContext) {
     visual.simulate_keystrokes("cmd-shift-p m o v e space f i l e s enter");
     visual.run_until_parked();
     let side = window
-        .update(&mut visual, |shell, _, _| shell.side_of(View::Files))
+        .update(&mut visual, |shell, _, _| shell.side_of(FILES))
         .unwrap();
-    assert_eq!(side, Side::Right);
+    assert_eq!(side, Some(Side::Right));
 }
 
 #[gpui::test]

@@ -3,6 +3,7 @@
 use gpui::TestAppContext;
 
 use super::docks::inside;
+use super::pane_features::switch;
 use super::tab_bar::click;
 use super::{ab_focused, keys, vault_names};
 use crate::shell::docks::MoveFilesToOtherDock;
@@ -86,6 +87,29 @@ fn the_files_header_search_opens_vault_search(cx: &mut TestAppContext) {
     assert!(inside(&mut cx, "sidebar-search", "panel-header-files"));
     click(&mut cx, "sidebar-search");
 
+    let open = window
+        .update(&mut cx, |shell, _, _| {
+            shell.modal_is::<crate::vault_search::VaultSearchDelegate>()
+        })
+        .unwrap();
+    assert!(open);
+}
+
+#[gpui::test]
+fn the_files_header_search_follows_the_vault_search_switch(cx: &mut TestAppContext) {
+    let (fs, window, mut cx, _a, _b) = ab_focused(cx);
+
+    switch(&fs, "vault_search", false, &mut cx);
+
+    assert!(cx.debug_bounds("sidebar-search").is_none());
+    for button in ["sidebar-new-note", "sidebar-new-folder"] {
+        assert!(inside(&mut cx, button, "panel-header-files"), "{button}");
+    }
+
+    switch(&fs, "vault_search", true, &mut cx);
+
+    assert!(inside(&mut cx, "sidebar-search", "panel-header-files"));
+    click(&mut cx, "sidebar-search");
     let open = window
         .update(&mut cx, |shell, _, _| {
             shell.modal_is::<crate::vault_search::VaultSearchDelegate>()

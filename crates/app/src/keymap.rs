@@ -7,11 +7,11 @@ use crate::Quit;
 use crate::command_palette;
 use crate::editor::actions::{
     Copy, Cut, DocEnd, DocStart, Down, FollowLink, FollowLinkInNewTab, FollowLinkInSplit, Newline,
-    Paste, Redo, SelectDown, SelectUp, Undo, Up,
+    Paste, Redo, SelectDown, SelectUp, ToggleTask, Undo, Up,
 };
+use crate::feature;
 use crate::field::{Cancel, Confirm};
 use crate::picker;
-use crate::quick_open::QuickOpen;
 use crate::shell::{
     ActivateLastTab, ActivatePaneDown, ActivatePaneLeft, ActivatePaneRight, ActivatePaneUp,
     ActivateTab, CloseTab, GoBack, GoForward, NewTab, NextTab, OpenVault, PreviousTab,
@@ -24,9 +24,14 @@ use crate::text_input::actions::{
     SelectRight,
 };
 use crate::vault::Save;
-use crate::vault_search::SearchVault;
 
 pub(crate) fn key_bindings() -> Vec<KeyBinding> {
+    let mut bindings = core_bindings();
+    bindings.extend(feature::bindings(feature::BUILTIN));
+    bindings
+}
+
+fn core_bindings() -> Vec<KeyBinding> {
     let input = Some(text_input::CONTEXT);
     let editor = Some(text_input::EDITOR_CONTEXT);
     let field = Some(text_input::FIELD_CONTEXT);
@@ -57,6 +62,8 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         // `enter` keeps shift on macOS, unlike a character key (gpui_macos `events.rs`).
         KeyBinding::new("cmd-shift-enter", FollowLinkInNewTab, editor),
         KeyBinding::new("cmd-alt-enter", FollowLinkInSplit, editor),
+        // Obsidian's key: `cmd-enter` stays the link's (task boxes spec, decision 4).
+        KeyBinding::new("cmd-l", ToggleTask, editor),
         KeyBinding::new("cmd-c", Copy, editor),
         KeyBinding::new("cmd-x", Cut, editor),
         KeyBinding::new("cmd-v", Paste, editor),
@@ -84,8 +91,6 @@ pub(crate) fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-n", NewNote, Some("AppShell")),
         KeyBinding::new("cmd-shift-n", NewFolder, Some("AppShell")),
         KeyBinding::new("cmd-o", OpenVault, Some("AppShell")),
-        KeyBinding::new("cmd-p", QuickOpen, Some("AppShell")),
-        KeyBinding::new("cmd-shift-f", SearchVault, Some("AppShell")),
         KeyBinding::new("cmd-shift-p", command_palette::Toggle, Some("AppShell")),
         KeyBinding::new("cmd-t", NewTab, Some("AppShell")),
         KeyBinding::new("cmd-shift-t", ReopenClosedTab, Some("AppShell")),

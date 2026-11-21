@@ -11,10 +11,12 @@ use gpui::{
 use inkra_index::{IndexSnapshot, NoteMatch, NoteQuery};
 use inkra_vault::{EntryId, Jobs};
 
+use crate::feature::{CommandDecl, FeatureId, Manifest};
 use crate::index::{IndexSync, NotesChanged};
 use crate::open::{FileActivated, Open};
 use crate::picker::runs::{IndexDelegate, Landed, Ran, Run, Runs, indexing_footer};
 use crate::picker::{Arrival, Picker, PickerDelegate, Update};
+use crate::shell::Activation;
 use crate::theme;
 use list::List;
 
@@ -29,6 +31,33 @@ actions!(quick_open, [QuickOpen]);
 
 /// Zed's file finder lists 100 too.
 const LIMIT: usize = 100;
+
+const QUICK_OPEN: FeatureId = FeatureId::new("quick_open");
+
+pub(crate) static MANIFEST: Manifest = Manifest {
+    id: QUICK_OPEN,
+    default_on: true,
+    after_first_frame: false,
+    commands: &[CommandDecl::new::<QuickOpen>(&["cmd-p"])],
+    panes: &[],
+    buttons: &[],
+    layers: &[],
+    activate,
+};
+
+/// No state of its own: the MRU is the shell's, read at each open.
+fn activate(fcx: &mut Activation) {
+    fcx.on_command::<QuickOpen>(|_, fcx| {
+        let Some(links) = fcx.index() else {
+            return;
+        };
+        let (shown, recent) = (fcx.shown(), fcx.recent());
+        fcx.open_picker(
+            |cx| QuickOpenDelegate::new(&links, shown, recent, cx),
+            |event: &FileActivated, fcx| fcx.open(event.file, None, event.open),
+        );
+    });
+}
 
 impl EventEmitter<FileActivated> for Picker<QuickOpenDelegate> {}
 

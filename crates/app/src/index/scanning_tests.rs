@@ -66,7 +66,7 @@ fn a_save_during_the_initial_scan_marks_no_indexed_step(cx: &mut TestAppContext)
     });
     cx.run_until_parked();
     let line = cx.read(|cx| cx.global::<Timeline>().line());
-    assert!(line.ends_with("indexed -"), "{line}");
+    assert!(line.contains(", indexed -,"), "{line}");
 
     gate.release();
     cx.run_until_parked();

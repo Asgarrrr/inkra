@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{Bounds, Pixels, Point, ShapedLine, SharedString, TextStyle, Window, point, px};
 use inkra_markdown::CodeBlock;
 use inkra_text::ByteOffset;
 
-use super::{DocumentLayout, LineLayout};
+use super::{DocumentLayout, Placed};
 use crate::theme::{self, Theme};
 
 #[cfg(test)]
@@ -25,13 +26,13 @@ pub(super) struct BlockLayout {
     /// How far its text scrolls: zero when every line fits.
     pub(super) max: Pixels,
     pub(super) background: Bounds<Pixels>,
-    pub(super) label: Option<(Point<Pixels>, ShapedLine)>,
+    pub(super) label: Option<(Point<Pixels>, Rc<ShapedLine>)>,
 }
 
 /// Shaped label texts, each distinct one once per `shape_document` call.
 pub(super) struct Labels<'a> {
     style: TextStyle,
-    shaped: HashMap<&'a str, ShapedLine>,
+    shaped: HashMap<&'a str, Rc<ShapedLine>>,
 }
 
 impl<'a> Labels<'a> {
@@ -47,18 +48,18 @@ impl<'a> Labels<'a> {
     }
 
     /// Shapes each distinct text once per layout.
-    pub(super) fn shape(&mut self, text: &'a str, window: &mut Window) -> ShapedLine {
+    pub(super) fn shape(&mut self, text: &'a str, window: &mut Window) -> Rc<ShapedLine> {
         self.shaped
             .entry(text)
             .or_insert_with(|| {
                 #[cfg(test)]
                 LABELS.with(|labels| labels.set(labels.get() + 1));
-                window.text_system().shape_line(
+                Rc::new(window.text_system().shape_line(
                     SharedString::from(text.to_owned()),
                     theme::CODE_BLOCK_LABEL_SIZE,
                     &[self.style.to_run(text.len())],
                     None,
-                )
+                ))
             })
             .clone()
     }
@@ -73,7 +74,7 @@ pub(super) struct Blocks {
 
 struct Building {
     start: ByteOffset,
-    label: Option<ShapedLine>,
+    label: Option<Rc<ShapedLine>>,
     top: Pixels,
     left: Pixels,
     widest: Pixels,
@@ -81,10 +82,11 @@ struct Building {
 }
 
 impl Blocks {
-    /// `column` is the wrap width, `None` off the editor: there the widest line stands in.
-    pub(super) fn new(column: Option<Pixels>) -> Self {
+    /// `column` is the wrap width, `None` off the editor: there the widest line stands in. `count`
+    /// is the note's code blocks.
+    pub(super) fn new(column: Option<Pixels>, count: usize) -> Self {
         Self {
-            done: Vec::new(),
+            done: Vec::with_capacity(count),
             open: None,
             column,
         }
@@ -100,15 +102,9 @@ impl Blocks {
         Some(self.done.len() + usize::from(closes_first))
     }
 
-    /// `block` holds `line`, from the cursor `line_metrics` reads; `bottom` is the line's last row's
-    /// bottom. `label` is read on the line that opens the block.
-    pub(super) fn line(
-        &mut self,
-        block: Option<&CodeBlock>,
-        label: Option<ShapedLine>,
-        line: &LineLayout,
-        bottom: Pixels,
-    ) {
+    /// `block` holds `line`; `bottom` is the line's last row's bottom. The label is read on the line
+    /// that opens the block.
+    pub(super) fn line(&mut self, block: Option<&CodeBlock>, line: &Placed, bottom: Pixels) {
         if self
             .open
             .as_ref()
@@ -121,7 +117,7 @@ impl Blocks {
         {
             self.open = Some(Building {
                 start: block.range.start,
-                label,
+                label: line.line.label.clone(),
                 top: line.top,
                 left: DocumentLayout::content_x(line, 0, block.range.start)
                     - theme::CODE_BLOCK_OUTSET,
@@ -130,6 +126,7 @@ impl Blocks {
             });
         }
         if let Some(open) = &mut self.open {
+            let line = &line.line;
             open.widest = open.widest.max(line.indent() + line.shape.wrapped.width());
             open.bottom = bottom;
         }

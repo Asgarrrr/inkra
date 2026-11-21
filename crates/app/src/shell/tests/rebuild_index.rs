@@ -11,6 +11,7 @@ use inkra_vault::Fs;
 use inkra_vault::mem_fs::MemFs;
 
 use super::tree_focused;
+use crate::feature::Registry;
 use crate::shell::{AppShell, Left};
 use crate::test_support;
 
@@ -29,6 +30,7 @@ fn rebuild_index_removes_the_cache_file_and_loads_every_note_again(cx: &mut Test
             None,
             Some(CACHE.into()),
             Left::default(),
+            Registry::default(),
             window,
             cx,
         )

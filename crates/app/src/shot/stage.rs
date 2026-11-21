@@ -167,7 +167,7 @@ impl Stage {
             .open_offscreen_window(WINDOW_SIZE, |window, cx| {
                 let fs: Arc<dyn Fs> = fs;
                 let opened = read_session(&fs, &launched, cx);
-                root(fs, launched, opened, window, cx)
+                root(fs, launched, opened, <_>::default(), window, cx)
             })
             .unwrap_or_else(|error| panic!("open the off-screen window: {error}"));
         // A new window reports the platform's Dark, so the shell's observer just overrode the theme.
@@ -287,12 +287,12 @@ impl Stage {
     }
 
     /// A probe's answer, or a panic naming what is missing.
-    fn drawn(
+    pub(crate) fn probe<R>(
         &mut self,
         window: WindowHandle<AppShell>,
         what: impl std::fmt::Display,
-        read: impl FnOnce(&AppShell, &App) -> Option<Point<Pixels>>,
-    ) -> Point<Pixels> {
+        read: impl FnOnce(&AppShell, &mut App) -> Option<R>,
+    ) -> R {
         window
             .update(&mut self.cx, |shell, _, cx| read(shell, cx))
             .unwrap_or_else(|error| panic!("read {what}: {error}"))
@@ -304,7 +304,7 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: usize,
     ) -> Point<Pixels> {
-        self.drawn(window, format_args!("code block {ix}"), |shell, cx| {
+        self.probe(window, format_args!("code block {ix}"), |shell, cx| {
             shell.block_center(ix, cx)
         })
     }
@@ -323,13 +323,13 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: usize,
     ) -> Point<Pixels> {
-        self.drawn(window, format_args!("tab {ix}"), |shell, _| {
+        self.probe(window, format_args!("tab {ix}"), |shell, _| {
             shell.tab_center(ix)
         })
     }
 
     pub(crate) fn nav_back_center(&mut self, window: WindowHandle<AppShell>) -> Point<Pixels> {
-        self.drawn(window, "the back arrow", |shell, _| shell.nav_back_center())
+        self.probe(window, "the back arrow", |shell, _| shell.nav_back_center())
     }
 
     pub(crate) fn dock_icon_point(
@@ -356,7 +356,7 @@ impl Stage {
     }
 
     fn tree_row_center(&mut self, window: WindowHandle<AppShell>, ix: f32) -> Point<Pixels> {
-        self.drawn(window, format_args!("the tree's row {ix}"), |shell, cx| {
+        self.probe(window, format_args!("the tree's row {ix}"), |shell, cx| {
             shell.tree_row_center(ix, cx)
         })
     }
@@ -366,7 +366,7 @@ impl Stage {
         window: WindowHandle<AppShell>,
         ix: f32,
     ) -> Point<Pixels> {
-        self.drawn(
+        self.probe(
             window,
             format_args!("quick open's row {ix}"),
             |shell, cx| shell.quick_open_row_center(ix, cx),

@@ -10,6 +10,7 @@ use inkra_vault::{EntryId, Fs};
 
 use super::splits::{close, split};
 use super::{keys, open, select, start_trash, text_of, trash};
+use crate::feature::Registry;
 use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::open::Open;
@@ -45,7 +46,16 @@ pub(super) fn saving(
                 file: PathBuf::from(SESSION),
                 session: None,
             };
-            AppShell::new(None, notes, Some(opened), None, Left::default(), window, cx)
+            AppShell::new(
+                None,
+                notes,
+                Some(opened),
+                None,
+                Left::default(),
+                Registry::default(),
+                window,
+                cx,
+            )
         }
     });
     let mut visual = VisualTestContext::from_window(window.into(), cx);

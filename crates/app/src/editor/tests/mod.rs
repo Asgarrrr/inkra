@@ -9,6 +9,8 @@ use inkra_text::{Buffer, ByteOffset};
 use super::EditorView;
 use crate::keymap::key_bindings;
 
+mod atoms;
+mod carry;
 mod clipboard;
 mod code_block_anchors;
 mod code_block_bar;
@@ -17,6 +19,7 @@ mod code_block_scroll;
 mod code_block_wrap;
 mod code_blocks;
 mod conceal;
+mod decorations;
 mod dispatch;
 mod drag;
 mod follow;
@@ -24,6 +27,7 @@ mod gutter;
 mod hanging;
 mod headings;
 mod inline_marker;
+mod list_slots;
 mod margin;
 mod markdown;
 mod paint;
@@ -33,6 +37,12 @@ mod scroll;
 mod shapes;
 mod split;
 mod swap;
+mod task_boxes;
+mod task_click;
+mod task_gutter;
+mod task_key;
+mod task_marks;
+mod task_widths;
 mod wrap;
 
 pub(super) fn with_editor<R>(

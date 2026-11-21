@@ -206,6 +206,9 @@ caret at the content's start, where Home lands, does not touch the bullet. A
 wider element would reveal `-` whenever the user types at the start of an
 item, and shift the line. Only offsets 0 and 1 reveal it.
 
+Superseded for a gutter item by task boxes D2 and D11 (`2026-11-16-task-boxes-design.md`): its
+bullet paints as `•` in a slot, and its element runs from the item part's start.
+
 Block elements end before their line ending. pulldown-cmark's ATX heading
 range includes the trailing `\n` (`firstpass.rs:1620,1646`, `:797-799`), so
 `# T\nx` would give the heading 0..4, and a caret at column 0 of the next line

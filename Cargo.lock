@@ -1770,6 +1770,7 @@ dependencies = [
  "bitflags 2.13.2",
  "chrono",
  "collections",
+ "criterion",
  "derive_more",
  "embed-resource",
  "etagere",
@@ -1779,6 +1780,7 @@ dependencies = [
  "gpui_macros",
  "gpui_shared_string",
  "gpui_util",
+ "hdrhistogram",
  "heapless",
  "http_client",
  "icu_segmenter",
@@ -2139,6 +2141,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hdrhistogram"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d1053f4708f0af3cf9fc5bffc7e68a914a3c45becb231c80068c9c3f78bea"
+dependencies = [
+ "byteorder",
+ "num-traits",
+]
+
+[[package]]
 name = "heapless"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2463,11 +2475,13 @@ dependencies = [
 name = "inkra-app"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "futures",
  "gpui",
  "gpui_platform",
  "image",
  "inkra-editor",
+ "inkra-highlight",
  "inkra-index",
  "inkra-layout",
  "inkra-markdown",
@@ -2485,6 +2499,18 @@ dependencies = [
 name = "inkra-editor"
 version = "0.1.0"
 dependencies = [
+ "criterion",
+ "inkra-text",
+ "proptest",
+]
+
+[[package]]
+name = "inkra-highlight"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "inkra-editor",
+ "inkra-markdown",
  "inkra-text",
  "proptest",
 ]

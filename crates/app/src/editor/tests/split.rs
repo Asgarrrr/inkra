@@ -8,9 +8,12 @@ use gpui::{Context, Entity, TestAppContext, VisualTestContext, Window, div, prel
 use inkra_text::{Buffer, ByteOffset};
 
 use super::at;
+use super::decorations::publish_warning;
 use crate::buffer_events::Reloaded;
 use crate::editor::EditorView;
 use crate::editor::actions::Undo;
+use crate::editor::parses;
+use crate::feature::fakes;
 use crate::text_input::InputHost;
 
 /// Draws both editors, so a stale pinned selection reaches the layout.
@@ -57,8 +60,10 @@ fn select(view: &Entity<EditorView>, range: std::ops::Range<usize>, cx: &mut Vis
         let buffer = buffer.read(cx);
         view.input
             .state_mut()
-            .move_to(buffer, at(range.start), false);
-        view.input.state_mut().move_to(buffer, at(range.end), true);
+            .move_to(buffer, at(range.start), false, inkra_editor::no_snap);
+        view.input
+            .state_mut()
+            .move_to(buffer, at(range.end), true, inkra_editor::no_snap);
     });
 }
 
@@ -190,6 +195,41 @@ fn two_views_share_one_parse(cx: &mut TestAppContext) {
         view.read_with(cx, |view, _| Rc::clone(&view.markdown))
     };
     assert!(Rc::ptr_eq(&markdown(&a, &mut cx), &markdown(&b, &mut cx)));
+}
+
+/// A version miss keeps the release subscription its first parse made.
+#[gpui::test]
+fn a_released_buffer_drops_its_parse(cx: &mut TestAppContext) {
+    let released = cx.new(|_| Buffer::new("# T\n"));
+    cx.update(|cx| parses::parsed(&released, cx));
+    released.update(cx, |buffer, _| {
+        buffer.transact_at(Instant::now(), |buffer| buffer.insert(at(3), "x"));
+    });
+    cx.update(|cx| parses::parsed(&released, cx));
+    assert_eq!(cx.update(|cx| parses::cached(cx)), 1);
+
+    // gpui releases a dropped entity when an update ends.
+    cx.update(|_| drop(released));
+    assert_eq!(cx.update(|cx| parses::cached(cx)), 0);
+}
+
+#[gpui::test]
+fn two_views_of_one_buffer_draw_the_same_marks(cx: &mut TestAppContext) {
+    let Split {
+        a,
+        b,
+        buffer,
+        mut cx,
+    } = split(cx, "TODO here\n");
+    cx.update(|_, cx| fakes::declare_todo(cx));
+
+    publish_warning(&buffer, 0..4, &mut cx);
+
+    let runs = |view: &Entity<EditorView>, cx: &mut VisualTestContext| {
+        view.read_with(cx, EditorView::warning_runs)
+    };
+    assert_eq!(runs(&a, &mut cx), [(4, true), (5, false)]);
+    assert_eq!(runs(&b, &mut cx), [(4, true), (5, false)]);
 }
 
 #[gpui::test]

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use inkra_text::{Buffer, ByteOffset, Utf16Offset, Version};
+use inkra_text::{Buffer, ByteOffset, Splice, Utf16Offset, Version, diff};
 use proptest::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -91,6 +91,37 @@ fn boundary(text: &str, index: usize) -> usize {
 fn ordered_boundaries(text: &str, a: usize, b: usize) -> (usize, usize) {
     let (a, b) = (boundary(text, a), boundary(text, b));
     (a.min(b), a.max(b))
+}
+
+fn apply(buf: &mut Buffer, op: Op) {
+    match op {
+        Op::Insert(at, text) => {
+            let at = boundary(buf.text(), at);
+            buf.transact(|buf| buf.insert(ByteOffset::new(at), &text));
+        }
+        Op::Delete(start, end) => {
+            let (start, end) = ordered_boundaries(buf.text(), start, end);
+            buf.transact(|buf| buf.delete(ByteOffset::new(start)..ByteOffset::new(end)));
+        }
+        Op::ReplaceInTransaction(start, end, text) => {
+            let (start, end) = ordered_boundaries(buf.text(), start, end);
+            buf.transact(|buf| buf.replace(ByteOffset::new(start)..ByteOffset::new(end), &text));
+        }
+        Op::InsertTwiceInTransaction(first_at, second_at, first, second) => {
+            let first_at = boundary(buf.text(), first_at);
+            buf.transact(|buf| {
+                buf.insert(ByteOffset::new(first_at), &first);
+                let second_at = boundary(buf.text(), second_at);
+                buf.insert(ByteOffset::new(second_at), &second);
+            });
+        }
+        Op::Undo => {
+            buf.undo();
+        }
+        Op::Redo => {
+            buf.redo();
+        }
+    }
 }
 
 fn check_line_index(buf: &Buffer) -> Result<(), TestCaseError> {
@@ -315,6 +346,60 @@ proptest! {
 
         while buf.undo().is_some() {
             check_line_index(&buf)?;
+        }
+    }
+
+    #[test]
+    fn edits_since_replays_onto_the_new_text(
+        parts in prop::collection::vec(text_strategy(), 0..8),
+        ops in prop::collection::vec(op_strategy(), 0..20),
+        rewrite in prop::collection::vec(text_strategy(), 0..8),
+    ) {
+        let mut buf = Buffer::new(parts.concat());
+        let old = buf.text().to_owned();
+        let mark = buf.edit_mark();
+        for op in ops {
+            apply(&mut buf, op);
+        }
+        prop_assert!(buf.apply_diff(&diff(buf.version(), buf.text(), &rewrite.concat())));
+
+        let mut provenance: Vec<Option<usize>> = (0..old.len()).map(Some).collect();
+        for splice in buf.edits_since(mark).unwrap() {
+            let at = splice.at.get();
+            provenance.splice(at..at + splice.removed_len, std::iter::repeat_n(None, splice.inserted_len));
+        }
+        prop_assert_eq!(provenance.len(), buf.text().len());
+        for (new, old_index) in provenance.iter().enumerate() {
+            if let Some(old_index) = old_index {
+                prop_assert_eq!(buf.text().as_bytes()[new], old.as_bytes()[*old_index]);
+            }
+        }
+    }
+
+    #[test]
+    fn composed_splices_replay_onto_the_new_text(
+        parts in prop::collection::vec(text_strategy(), 0..8),
+        ops in prop::collection::vec(op_strategy(), 0..20),
+        rewrite in prop::collection::vec(text_strategy(), 0..8),
+    ) {
+        let mut buf = Buffer::new(parts.concat());
+        let old = buf.text().to_owned();
+        let mark = buf.edit_mark();
+        for op in ops {
+            apply(&mut buf, op);
+        }
+        prop_assert!(buf.apply_diff(&diff(buf.version(), buf.text(), &rewrite.concat())));
+        let (old, new) = (old.as_bytes(), buf.text().as_bytes());
+
+        match Splice::compose(buf.edits_since(mark).unwrap()) {
+            None => prop_assert_eq!(new, old),
+            Some(Splice { at, removed_len, inserted_len }) => {
+                let at = at.get();
+                prop_assert!(at + removed_len <= old.len());
+                prop_assert!(at + inserted_len <= new.len());
+                let replayed = [&old[..at], &new[at..at + inserted_len], &old[at + removed_len..]].concat();
+                prop_assert_eq!(replayed.as_slice(), new);
+            }
         }
     }
 

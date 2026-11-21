@@ -147,7 +147,8 @@ not an error.
 means `Fs::rename` runs and no path is safe. `Some(path)` is the new path
 while the vault still lists the old one. `NoteStore::path_of` reads `moves`
 first, then the vault. Every fs op on a note resolves its path through
-`path_of`: `write_path`, `trash_target`, a rename's source and `open_note`.
+`path_of`: `write_path`, `trash_target`, a rename's source, `open_note`,
+`NoteStore::read_bytes` and `create`'s parent.
 
 - **The rename's chain link ends after `Fs::rename`.** It records the new
   path in `moves` and requests the rescan in the same turn. A write, a trash

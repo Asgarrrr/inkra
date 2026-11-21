@@ -2,6 +2,8 @@
 //! keystroke does not re-shape the whole document.
 
 mod blocks;
+mod dirty;
+mod line;
 mod paint;
 mod prefix;
 mod rows;
@@ -13,11 +15,15 @@ mod shape;
 #[cfg(test)]
 pub(crate) use blocks::label_shape_count;
 #[cfg(test)]
-pub(crate) use paint::{painted, painted_blocks, painted_clips};
+pub(crate) use line::line_shape_count;
+#[cfg(test)]
+pub(crate) use paint::{
+    painted, painted_blocks, painted_boxes, painted_clips, painted_marks, painted_tops,
+};
 pub(crate) use scrolls::BlockScrolls;
 pub(crate) use shape::shape_document;
 #[cfg(test)]
-pub(crate) use shape::{line_shape_count, shape_count};
+pub(crate) use shape::{line_build_count, shape_count};
 
 use std::ops::{Range, RangeInclusive};
 use std::rc::Rc;
@@ -25,49 +31,22 @@ use std::sync::Arc;
 
 use blocks::BlockLayout;
 use gpui::{Bounds, Pixels, Point, TextStyle, point, px, size};
-use inkra_markdown::{DisplayLine, DisplayOffset, Markdown, touched};
-use inkra_text::{Bias, Buffer, ByteOffset, Version};
+use inkra_markdown::{DisplayOffset, Markdown, touched};
+use inkra_text::{Bias, Buffer, ByteOffset, EditMark, Version};
+use line::{LineLayout, Placed};
 use prefix::Prefix;
-use shape::{LineShape, reads_margin};
+use shape::reads_margin;
 
+use crate::decorations::Drawn;
 use crate::theme::Theme;
 
 const NEWLINE_STUB: f32 = 0.25;
 const CARET_WIDTH: Pixels = px(2.);
 
-struct LineLayout {
-    shape: Rc<LineShape>,
-    range: Range<ByteOffset>,
-    display: DisplayLine,
-    first_row: usize,
-    rows: Vec<Row>,
-    top: Pixels,
-    row_height: Pixels,
-    /// Kept out of the shaped text in both states, so no reveal re-wraps the line.
-    prefix: Option<Prefix>,
-    /// The index in `code_blocks` of the block holding this line.
-    block: Option<usize>,
-}
-
-impl LineLayout {
-    fn indent(&self) -> Pixels {
-        prefix::indent(self.prefix.as_ref())
-    }
-}
-
-/// A wrap offset belongs to the next row, never the earlier one's `caret_end`
-/// (Zed's rule, `wrap_map.rs:969-981`) — this is what lets the caret skip affinity.
-struct Row {
-    /// On a grapheme boundary, even where gpui broke inside a cluster.
-    start: ByteOffset,
-    caret_end: ByteOffset,
-    start_x: Pixels,
-}
-
 /// What a `DocumentLayout` is shaped from: `shape_document` takes it, `is_shaped_from` compares it.
 pub(crate) struct LayoutInputs<'a> {
     pub(crate) buffer: &'a Buffer,
-    pub(crate) markdown: &'a Markdown,
+    pub(crate) markdown: &'a Rc<Markdown>,
     pub(crate) selection: &'a Range<ByteOffset>,
     pub(crate) marked: Option<&'a Range<ByteOffset>>,
     pub(crate) style: &'a TextStyle,
@@ -79,12 +58,13 @@ pub(crate) struct LayoutInputs<'a> {
     pub(crate) theme: &'a Arc<Theme>,
     /// Read live, never compared: a scroll reshapes nothing.
     pub(crate) scrolls: &'a BlockScrolls,
+    pub(crate) decorations: Drawn<'a>,
 }
 
 /// Every pixel↔offset conversion, for every `TextInput` host. Works in rows, not
 /// lines, since a wrapped line paints on several.
 pub(crate) struct DocumentLayout {
-    lines: Vec<LineLayout>,
+    lines: Vec<Placed>,
     row_count: usize,
     height: Pixels,
     /// One per quote level per line, from its top to the next line's (markdown blocks spec, D3),
@@ -100,7 +80,13 @@ pub(crate) struct DocumentLayout {
     code_block_wrap: bool,
     /// Compared by pointer: a theme change reshapes once, an unchanged one costs nothing.
     theme: Arc<Theme>,
-    version: Version,
+    /// The buffer's version and the decorations' revision.
+    shaped_at: (Version, Option<u64>),
+    /// `Buffer::id`: a mark from another buffer would find no splices and carry every line.
+    buffer: u64,
+    at: EditMark,
+    /// What `markdown` the lines were built from, for the next layout's parse diff.
+    markdown: Rc<Markdown>,
     selection: Range<ByteOffset>,
     marked: Option<Range<ByteOffset>>,
     scrolls: BlockScrolls,
@@ -124,18 +110,25 @@ impl DocumentLayout {
     }
 
     /// Whether `shape_document` would give this layout back. The selection counts only
-    /// through the elements it reveals, so a caret move within the same ones reuses it.
+    /// through the elements it reveals, so a caret move within the same ones reuses it. A layer
+    /// trailing the buffer has no revision to compare, so nothing is reused then.
     pub(crate) fn is_shaped_from(&self, inputs: &LayoutInputs<'_>) -> bool {
-        self.version == inputs.buffer.version()
-            && self.wrap_width == inputs.wrap_width
+        let revision = inputs.decorations.revision();
+        revision.is_some()
+            && self.shaped_at == (inputs.buffer.version(), revision)
+            && self.same_settings(inputs)
             && (self.margin == inputs.margin
                 || !reads_margin(inputs.buffer, inputs.markdown, inputs.selection))
-            && self.code_block_wrap == inputs.code_block_wrap
             && self.marked.as_ref() == inputs.marked
-            && self.style == *inputs.style
-            && Arc::ptr_eq(&self.theme, inputs.theme)
             && touched(&inputs.markdown.conceals, &self.selection)
                 .eq(touched(&inputs.markdown.conceals, inputs.selection))
+    }
+
+    fn same_settings(&self, inputs: &LayoutInputs<'_>) -> bool {
+        self.style == *inputs.style
+            && Arc::ptr_eq(&self.theme, inputs.theme)
+            && self.wrap_width == inputs.wrap_width
+            && self.code_block_wrap == inputs.code_block_wrap
     }
 
     pub(crate) fn row_count(&self) -> usize {
@@ -143,7 +136,7 @@ impl DocumentLayout {
     }
 
     pub(crate) fn row_height(&self, row: usize) -> Pixels {
-        self.locate(row).0.row_height
+        self.locate(row).0.line.row_height
     }
 
     pub(crate) fn body_row_height(&self) -> Pixels {
@@ -153,7 +146,25 @@ impl DocumentLayout {
     /// The text line `line` was shaped from.
     #[cfg(test)]
     pub(crate) fn shown(&self, line: usize) -> &str {
-        &self.lines[line].shape.wrapped.text
+        &self.lines[line].line.shape.wrapped.text
+    }
+
+    /// Each run of line `line`: its length in shown bytes and its colour.
+    #[cfg(test)]
+    pub(crate) fn run_colors(&self, line: usize) -> Vec<(usize, gpui::Hsla)> {
+        let runs = &self.lines[line].line.shape.runs;
+        runs.iter().map(|run| (run.len, run.color)).collect()
+    }
+
+    /// Each line's index in `code_blocks`.
+    #[cfg(test)]
+    pub(crate) fn line_blocks(&self) -> Vec<Option<usize>> {
+        self.lines.iter().map(|line| line.block).collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn line_tops(&self) -> Vec<Pixels> {
+        self.lines.iter().map(|line| line.top).collect()
     }
 
     #[cfg(test)]
@@ -181,16 +192,6 @@ impl DocumentLayout {
             .collect()
     }
 
-    /// Whether line `line`'s prefix paints its source text.
-    #[cfg(test)]
-    pub(crate) fn prefix_painted(&self, line: usize) -> bool {
-        self.lines[line]
-            .prefix
-            .as_ref()
-            .and_then(Prefix::shown)
-            .is_some()
-    }
-
     pub(crate) fn height(&self) -> Pixels {
         self.height
     }
@@ -206,20 +207,22 @@ impl DocumentLayout {
             reason = "a count far below 2^24 converts to f32 exactly"
         )]
         let within = within as f32;
-        line.top + line.row_height * within
+        line.top + line.line.row_height * within
     }
 
     /// Clamped: the layout can briefly describe other text than the buffer's
     /// (`NameField` shapes only in `prepaint`), so a stale caret beats an OOB index.
     fn line_for_offset(&self, offset: ByteOffset) -> usize {
         self.lines
-            .partition_point(|line| line.range.end < offset)
+            .partition_point(|line| line.end() < offset)
             .min(self.lines.len() - 1)
     }
 
     pub(crate) fn row_for_offset(&self, offset: ByteOffset) -> usize {
         let line = &self.lines[self.line_for_offset(offset)];
+        let offset = line.within(offset);
         let within = line
+            .line
             .rows
             .iter()
             .rposition(|row| row.start <= offset)
@@ -227,7 +230,7 @@ impl DocumentLayout {
         line.first_row + within
     }
 
-    fn locate(&self, row: usize) -> (&LineLayout, usize) {
+    fn locate(&self, row: usize) -> (&Placed, usize) {
         let row = row.min(self.row_count - 1);
         let line = self.lines.partition_point(|line| line.first_row <= row) - 1;
         let line = &self.lines[line];
@@ -246,8 +249,8 @@ impl DocumentLayout {
             clippy::cast_sign_loss,
             reason = "`y >= line.top`, so the row quotient is non-negative and small"
         )]
-        let within = ((y - line.top) / line.row_height) as usize;
-        line.first_row + within.min(line.rows.len() - 1)
+        let within = ((y - line.top) / line.line.row_height) as usize;
+        line.first_row + within.min(line.line.rows.len() - 1)
     }
 
     /// Only row 0 holds the prefix.
@@ -256,42 +259,44 @@ impl DocumentLayout {
     }
 
     /// `offset`'s x on the row as shaped, before any block scroll.
-    fn content_x(line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
-        let offset = offset.clamp(line.range.start, line.range.end);
+    fn content_x(line: &Placed, within: usize, offset: ByteOffset) -> Pixels {
+        let offset = line.within(offset);
+        let line = &*line.line;
         if let Some(x) = Self::prefix_x(line, within, offset) {
             return x;
         }
-        let index = line.display.to_display(offset).get();
+        let index = line.display.to_display(ByteOffset::new(offset)).get();
         line.indent() + line.shape.wrapped.unwrapped_layout.x_for_index(index)
             - line.rows[within].start_x
     }
 
-    /// `offset`'s x in the prefix, when the prefix paints it.
-    fn prefix_x(line: &LineLayout, within: usize, offset: ByteOffset) -> Option<Pixels> {
-        let offset = offset.clamp(line.range.start, line.range.end);
+    /// The x of `offset`, from the line's start, in the prefix, when the prefix paints it.
+    fn prefix_x(line: &LineLayout, within: usize, offset: usize) -> Option<Pixels> {
         Self::prefix_on(line, within)
             .filter(|prefix| offset < prefix.range().end)
             .and_then(|prefix| prefix.x_for_offset(offset))
     }
 
     /// `content_x` less the line's block scroll; the prefix never moves.
-    fn x_on_row(&self, line: &LineLayout, within: usize, offset: ByteOffset) -> Pixels {
+    fn x_on_row(&self, line: &Placed, within: usize, offset: ByteOffset) -> Pixels {
         let x = Self::content_x(line, within, offset);
         match line.block {
-            Some(block) if Self::prefix_x(line, within, offset).is_none() => {
+            Some(block) if Self::prefix_x(&line.line, within, line.within(offset)).is_none() => {
                 x - self.block_scroll(block)
             }
             _ => x,
         }
     }
 
-    fn row_limit(line: &LineLayout, within: usize) -> ByteOffset {
-        line.rows
-            .get(within + 1)
-            .map_or(line.range.end, |next| next.start)
+    fn row_limit(line: &Placed, within: usize) -> ByteOffset {
+        let rows = &line.line.rows;
+        line.start
+            + rows
+                .get(within + 1)
+                .map_or(line.line.len, |next| next.start)
     }
 
-    fn row_end_x(&self, line: &LineLayout, within: usize) -> Pixels {
+    fn row_end_x(&self, line: &Placed, within: usize) -> Pixels {
         self.x_on_row(line, within, Self::row_limit(line, within))
     }
 
@@ -324,15 +329,18 @@ impl DocumentLayout {
     /// Clamped to the row's own range, so landing past its end stops on
     /// `caret_end` rather than the next row's start.
     pub(crate) fn offset_on_row(&self, row: usize, x: Pixels) -> ByteOffset {
-        let (line, within) = self.locate(row);
+        let (placed, within) = self.locate(row);
+        let line = &*placed.line;
         let target = &line.rows[within];
         // Row 0 splits at the text's start: left of it is the prefix's, and the text never maps into the prefix (D12).
         let prefix = Self::prefix_on(line, within);
         if let Some(prefix) = prefix.filter(|prefix| x < prefix.indent()) {
-            return prefix.offset_for_x(x).clamp(target.start, target.caret_end);
+            return placed.start + prefix.offset_for_x(x).clamp(target.start, target.caret_end);
         }
         let layout = &line.shape.wrapped.unwrapped_layout;
-        let scroll = line.block.map_or(px(0.), |block| self.block_scroll(block));
+        let scroll = placed
+            .block
+            .map_or(px(0.), |block| self.block_scroll(block));
         let index = layout.closest_index_for_x(x + scroll - line.indent() + target.start_x);
         // At or past the display end, land after a hidden suffix (live-preview spec, D5).
         let bias = if index >= layout.len {
@@ -343,14 +351,15 @@ impl DocumentLayout {
         let offset = line
             .display
             .to_buffer(DisplayOffset::new(index), bias)
+            .get()
             .clamp(target.start, target.caret_end);
-        prefix.map_or(offset, |prefix| offset.max(prefix.range().end))
+        placed.start + prefix.map_or(offset, |prefix| offset.max(prefix.range().end))
     }
 
     pub(crate) fn row_bounds(&self, row: usize) -> RangeInclusive<ByteOffset> {
         let (line, within) = self.locate(row);
-        let row = &line.rows[within];
-        row.start..=row.caret_end
+        let row = &line.line.rows[within];
+        line.start + row.start..=line.start + row.caret_end
     }
 
     /// False when this row's only position also belongs to the next: two wraps
@@ -371,7 +380,10 @@ impl DocumentLayout {
         let top = self.top_for_row(row);
         Bounds::from_corners(
             point(self.x_on_row(line, within, range.start), top),
-            point(self.x_on_row(line, within, end), top + line.row_height),
+            point(self.x_on_row(line, within, end), top + line.line.row_height),
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

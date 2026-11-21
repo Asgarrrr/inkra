@@ -9,6 +9,7 @@ all-features = true
 ignore = [
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz, via usvg/resvg in gpui's font stack" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser, via usvg/fontdb in gpui's font stack" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono, via gpui and its scheduler" },
 ]
 
 [licenses]

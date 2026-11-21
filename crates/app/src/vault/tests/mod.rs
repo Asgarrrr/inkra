@@ -4,6 +4,7 @@ use gpui::{Entity, Focusable, TestAppContext, VisualTestContext, prelude::*};
 use inkra_vault::Fs;
 
 use crate::editor::EditorView;
+use crate::feature::Registry;
 use crate::keymap::key_bindings;
 use crate::shell::{AppShell, Left};
 use crate::test_support::detached_store;
@@ -33,7 +34,16 @@ pub(super) fn open_shell(
     let window = cx.add_window({
         let notes = notes.clone();
         move |window, cx| {
-            AppShell::new(Some(editor), notes, None, None, Left::default(), window, cx)
+            AppShell::new(
+                Some(editor),
+                notes,
+                None,
+                None,
+                Left::default(),
+                Registry::default(),
+                window,
+                cx,
+            )
         }
     });
     window

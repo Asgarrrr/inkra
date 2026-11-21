@@ -7,6 +7,8 @@ use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs};
 
+use super::features::palette_lists;
+use super::pane_features::switch;
 use super::{activate, editor, no_vault, open_vault, showing, tree_focused};
 use crate::keymap::key_bindings;
 use crate::open::Open;
@@ -281,4 +283,43 @@ fn picking_a_hit_then_another_drops_the_first(cx: &mut TestAppContext) {
     editor(&window, &mut visual).update(&mut visual, |editor, _| {
         assert_eq!(editor.selected(), range_of("alpha plan", "plan"));
     });
+}
+
+#[gpui::test]
+fn cmd_shift_f_follows_the_vault_search_switch(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha");
+    fs.insert_file("/vault/b.md", "beta");
+    let (window, mut visual, _) = shown_in(cx, &fs);
+    visual.simulate_keystrokes("cmd-shift-f");
+    assert!(modal_is::<VaultSearchDelegate>(window, &mut visual));
+    visual.simulate_keystrokes("cmd-shift-f");
+
+    switch(&fs, "vault_search", false, &mut visual);
+    visual.simulate_keystrokes("cmd-shift-f");
+    assert!(!has_modal(window, &mut visual));
+    assert!(!palette_lists("Search vault", window, &mut visual));
+
+    switch(&fs, "vault_search", true, &mut visual);
+    visual.simulate_keystrokes("cmd-shift-f");
+    assert!(modal_is::<VaultSearchDelegate>(window, &mut visual));
+}
+
+#[gpui::test]
+fn disabling_vault_search_closes_its_picker_mid_query(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "alpha plan");
+    fs.insert_file("/vault/b.md", "beta\nplan");
+    let (window, mut visual, [a, _b]) = shown_in(cx, &fs);
+    // No `settle`: the debounced runs stay outstanding across the switch.
+    visual.simulate_keystrokes("cmd-shift-f p l a n");
+    let picker = vault_search(window, &mut visual).downgrade();
+
+    switch(&fs, "vault_search", false, &mut visual);
+    settle(&mut visual);
+
+    assert!(!has_modal(window, &mut visual));
+    assert!(editor_focused(window, &mut visual));
+    assert!(picker.upgrade().is_none(), "nothing holds the picker");
+    assert_eq!(showing(&window, &mut visual), Some(a));
 }

@@ -402,3 +402,22 @@ fn a_note_opened_during_the_initial_scan_shows_building(cx: &mut TestAppContext)
     assert!(panel.read_with(cx, |panel, _| panel.building));
     gate.release();
 }
+
+/// With no note shown there is nothing to wait for: "No backlinks", even mid-scan.
+#[gpui::test]
+fn no_note_during_the_initial_scan_is_not_building(cx: &mut TestAppContext) {
+    let fs = Arc::new(MemFs::new());
+    fs.insert_file("/vault/a.md", "");
+    fs.insert_file("/vault/f/b.md", "[[a]]");
+    let gate = fs.block_read_dir("/vault/f");
+    let notes = unscanned_notes(cx, Arc::clone(&fs) as Arc<dyn Fs>);
+    let links = index_sync(&notes, cx);
+    let vault = vault_of(&notes, cx);
+    let panel = cx.update(|cx| cx.new(|cx| BacklinksPanel::new(links, vault, cx)));
+    cx.run_until_parked();
+
+    panel.update(cx, |panel, cx| panel.set_file(None, cx));
+
+    assert!(!panel.read_with(cx, |panel, _| panel.building));
+    gate.release();
+}

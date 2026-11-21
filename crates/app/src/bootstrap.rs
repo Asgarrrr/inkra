@@ -14,11 +14,13 @@ use inkra_vault::{Fs, RealFs, Stamp, Vault, VaultError};
 use crate::Quit;
 use crate::app_files::{cache_file, session_file};
 use crate::editor::EditorView;
+use crate::feature::{BUILTIN, Registry};
 use crate::keymap::key_bindings;
 use crate::last_vault;
 use crate::restore::{
     self, Opened, SavedFileTab, SavedGroup, SavedMember, SavedTab, SavedWindow, Session,
 };
+use crate::settings::Switches;
 use crate::shell::{AppShell, Left, couldnt_open};
 use crate::sidebar::title_of;
 use crate::theme::{self, store::Resolved};
@@ -96,10 +98,11 @@ pub(crate) fn root(
     fs: Arc<dyn Fs>,
     launched: Launch,
     opened: Option<Opened>,
+    features: Registry,
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AppShell> {
-    cx.new(|cx| build_shell(fs, launched, opened, Left::default(), window, cx))
+    cx.new(|cx| build_shell(fs, launched, opened, Left::default(), features, window, cx))
 }
 
 /// Takes the `Fs` rather than naming `RealFs` itself, so the off-screen
@@ -109,6 +112,7 @@ pub(crate) fn build_shell(
     launched: Launch,
     opened: Option<Opened>,
     left: Left,
+    features: Registry,
     window: &mut Window,
     cx: &mut Context<AppShell>,
 ) -> AppShell {
@@ -135,7 +139,7 @@ pub(crate) fn build_shell(
             )
         }
     };
-    let mut shell = AppShell::new(editor, notes, opened, cache, left, window, cx);
+    let mut shell = AppShell::new(editor, notes, opened, cache, left, features, window, cx);
     if let Some(text) = notice {
         shell.show_notice(text, None, cx);
     }
@@ -289,6 +293,10 @@ pub fn run() {
         };
         theme::install(resolved.theme.clone(), cx);
         theme::set_code_block_wrap(resolved.code_block_wrap, cx);
+        let features = Registry::new(
+            BUILTIN,
+            resolved.features.as_ref().unwrap_or(&Switches::default()),
+        );
         let fs: Arc<dyn Fs> = Arc::new(RealFs);
         let opened = read_session(&fs, &launched, cx);
         let saved = opened
@@ -310,7 +318,7 @@ pub fn run() {
                 window_background: WindowBackgroundAppearance::Blurred,
                 ..Default::default()
             },
-            |window, cx| root(fs, launched, opened, window, cx),
+            |window, cx| root(fs, launched, opened, features, window, cx),
         );
 
         match window {

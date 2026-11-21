@@ -26,6 +26,24 @@ fn block_after_rename_parks_after_the_file_moved() {
 }
 
 #[test]
+fn hold_loads_parks_every_load_until_released() {
+    let fs = MemFs::new();
+    let path = Path::new("/vault/a.md");
+    fs.insert_file(path, "alpha");
+
+    let gate = fs.hold_loads(path);
+    let mut first = Box::pin(fs.load(path));
+    let mut second = Box::pin(fs.load(path));
+    assert!(block_on(async { futures::poll!(first.as_mut()) }).is_pending());
+    assert!(block_on(async { futures::poll!(second.as_mut()) }).is_pending());
+
+    gate.release();
+    for load in [first, second] {
+        assert_eq!(block_on(load).expect("loads once released").text, "alpha");
+    }
+}
+
+#[test]
 fn fail_next_saves_fails_that_many_saves_then_writes() {
     let fs = MemFs::new();
     let path = Path::new("/vault/a.md");

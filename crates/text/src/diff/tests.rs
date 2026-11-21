@@ -285,3 +285,27 @@ fn a_mapped_offset_equals_an_anchor_across_touching_hunks() {
         }
     }
 }
+
+/// Hunks that touch are in order: a replacement, then one starting where it ends.
+#[test]
+fn a_diff_built_from_ordered_hunks_applies_them_all() {
+    let mut buffer = Buffer::new("abcd");
+    let diff = Diff::new(
+        buffer.version(),
+        vec![hunk(0..1, "x"), hunk(1..2, "y"), hunk(4..4, "!")],
+    );
+    assert!(buffer.apply_diff(&diff));
+    assert_eq!(buffer.text(), "xycd!");
+}
+
+#[test]
+#[should_panic(expected = "hunks out of order")]
+fn a_diff_built_from_hunks_out_of_order_panics() {
+    let _ = Diff::new(Version::default(), vec![hunk(2..3, "x"), hunk(0..1, "y")]);
+}
+
+#[test]
+#[should_panic(expected = "hunks out of order")]
+fn a_diff_built_from_overlapping_hunks_panics() {
+    let _ = Diff::new(Version::default(), vec![hunk(0..2, "x"), hunk(1..3, "y")]);
+}

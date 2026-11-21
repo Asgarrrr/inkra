@@ -4,12 +4,14 @@ use std::ops::Range;
 
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Window};
 use inkra_index::{Resolution, Target};
-use inkra_layout::{GroupId, SplitDirection, View};
+use inkra_layout::{GroupId, SplitDirection};
 use inkra_markdown::Link;
 use inkra_text::{Buffer, ByteOffset};
 use inkra_vault::EntryId;
 
+use super::features::NoteShown;
 use super::group::Group;
+use super::parked::Parked;
 use super::surface::Landing;
 use super::tabs::{Place, capture};
 use super::{AppShell, Bound, Shown, remember};
@@ -26,13 +28,34 @@ pub(super) struct Origin {
     pub(super) since: Cursor,
 }
 
+/// How a landing enters the tabs; either way only while the tab active at the start still is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Commit {
+    /// Into that tab, its place pushed onto its history.
+    Here,
+    /// As a new tab after it, which parks it.
+    NewTab,
+}
+
 impl AppShell {
-    /// Commits into the tab active when it started, or nowhere; no `await` from bind to `set_current`.
+    /// Commits into the tab active when it started, or nowhere.
     pub(super) fn open_file(
         &mut self,
         id: EntryId,
         kind: FileKind,
         at: Option<Range<ByteOffset>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.spawn_open(id, kind, at, Commit::Here, cx);
+    }
+
+    /// The group's one pending open; no `await` from bind to `set_current`.
+    pub(super) fn spawn_open(
+        &mut self,
+        id: EntryId,
+        kind: FileKind,
+        at: Option<Range<ByteOffset>>,
+        commit: Commit,
         cx: &mut Context<Self>,
     ) {
         let origin = Origin {
@@ -49,10 +72,22 @@ impl AppShell {
             let _ = shell.update_in(cx, |shell, window, cx| {
                 let Group { tabs, shown, .. } = shell.group_mut(origin.group);
                 // T4: `show` drops `activation` on every other change to what the active tab shows.
-                if !tabs.commit(tab, || capture(shown, cx)) {
+                let committed = match commit {
+                    Commit::Here => tabs.commit(tab, || capture(shown, cx)),
+                    Commit::NewTab if tabs.active() == tab => {
+                        tabs.insert(tabs.active_index() + 1, || Parked::park(shown, cx));
+                        true
+                    }
+                    Commit::NewTab => false,
+                };
+                if !committed {
                     return;
                 }
                 shell.land(origin, id, landing, at, window, cx);
+                if commit == Commit::NewTab {
+                    shell.keep_active_tab_visible(origin.group);
+                    cx.notify();
+                }
             });
         }));
     }
@@ -149,13 +184,12 @@ impl AppShell {
         }
     }
 
-    /// The note's handle to focus now, or the tree's if the active group shows Files; `None` while a
-    /// picker keeps the keys typed into it, until its dismissal lands there.
+    /// The note's handle to focus now, or the pane's if the active group shows one that focuses; `None`
+    /// while a picker keeps the keys typed into it, until its dismissal lands there.
     fn focus_target(&mut self, cx: &App) -> Option<FocusHandle> {
-        let tree = (self.center().shown.view() == Some(View::Files))
-            .then(|| self.tree_focus(cx))
-            .flatten();
-        let focus = tree.unwrap_or_else(|| self.focus_handle(cx));
+        let pane = self.center().shown.view();
+        let pane = pane.and_then(|view| self.pane_focus(view, cx));
+        let focus = pane.unwrap_or_else(|| self.focus_handle(cx));
         match &mut self.modal {
             Some(modal) => {
                 modal.restore_to(focus);
@@ -222,9 +256,7 @@ impl AppShell {
                     .sidebar
                     .update(cx, |sidebar, cx| sidebar.follow(id, since, cx));
             }
-            panes
-                .backlinks
-                .update(cx, |backlinks, cx| backlinks.set_file(file, cx));
+            cx.emit(NoteShown(file));
         }
         match (&self.center().shown, note) {
             (Shown::View(_), _) => {}

@@ -1,5 +1,5 @@
 use gpui::Entity;
-use inkra_layout::View;
+use inkra_layout::ViewId;
 use inkra_vault::EntryId;
 
 use crate::editor::EditorView;
@@ -18,7 +18,7 @@ pub(super) enum Shown {
     /// The note's trash is pending: no editor until `NoteClosed` or `TrashFailed`.
     /// Entered only from a bound note, so a failed trash always finds its buffer again.
     Trashing(EntryId),
-    View(View),
+    View(ViewId),
 }
 
 impl Shown {
@@ -39,7 +39,7 @@ impl Shown {
         }
     }
 
-    pub(super) fn view(&self) -> Option<View> {
+    pub(super) fn view(&self) -> Option<ViewId> {
         match self {
             Self::View(view) => Some(*view),
             Self::Empty | Self::Bound(_) | Self::Image(_) | Self::Trashing(_) => None,

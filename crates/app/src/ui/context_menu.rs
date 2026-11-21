@@ -4,7 +4,7 @@ use gpui::{
     prelude::FluentBuilder, px,
 };
 
-use super::{Icon, IconName, Indicator, Label, ListItem, h_flex, v_flex};
+use super::{Elevation, Icon, IconName, Indicator, Label, ListItem, elevated, h_flex, v_flex};
 use crate::field::{Cancel, Confirm};
 use crate::{picker, theme};
 
@@ -101,8 +101,7 @@ impl Focusable for ContextMenu {
 
 impl Render for ContextMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::current(cx).colors;
-        v_flex()
+        let menu = v_flex()
             .key_context("ContextMenu")
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::select_next))
@@ -111,13 +110,9 @@ impl Render for ContextMenu {
             .on_action(cx.listener(|_, _: &Cancel, _, cx| cx.emit(MenuClosed(None))))
             .debug_selector(|| "context-menu".into())
             .min_w(MENU_MIN_WIDTH)
-            .p(theme::MENU_INSET)
-            .bg(colors.elevated_background)
-            .border_1()
-            .border_color(colors.border)
-            .rounded(theme::ELEVATED_RADIUS)
-            .shadow_lg()
-            .children(self.entries.iter().enumerate().map(|(ix, entry)| {
+            .p(theme::MENU_INSET);
+        elevated(menu, Elevation::High, cx).children(self.entries.iter().enumerate().map(
+            |(ix, entry)| {
                 let selected = self.selected == Some(ix);
                 let action = entry.action();
                 ListItem::new(("context-menu-item", ix))
@@ -143,6 +138,7 @@ impl Render for ContextMenu {
                             action.as_ref().map(|action| action.boxed_clone()),
                         ));
                     }))
-            }))
+            },
+        ))
     }
 }

@@ -153,7 +153,7 @@ fn a_quoted_background_starts_past_the_gutter(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_listed_background_starts_at_the_fence_column(cx: &mut TestAppContext) {
     let blocks = backgrounds(cx, "- a\n\n  ```\n  x\n  ```\nbody");
-    assert_block(&blocks, 11.2, Some(56.), None);
+    assert_block(&blocks, 18., Some(56.), None);
 }
 
 #[gpui::test]
@@ -165,7 +165,7 @@ fn an_indented_background_starts_at_the_indent(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_listed_block_in_a_quote_starts_past_both(cx: &mut TestAppContext) {
     let blocks = backgrounds(cx, "> - a\n>\n>   ```\n>   x\n>   ```\n\nbody");
-    assert_block(&blocks, 32.8, None, None);
+    assert_block(&blocks, 39.6, None, None);
 }
 
 #[gpui::test]

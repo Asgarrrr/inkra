@@ -2,10 +2,13 @@
 
 mod assets;
 mod code_blocks;
+mod code_highlighting;
 mod command_palette;
+mod decorations;
 mod docks;
 mod failures;
 mod gone;
+mod headings;
 mod hover;
 mod markdown_blocks;
 mod quick_open;
@@ -58,17 +61,6 @@ const MARKDOWN: &str = "---\n\
                         | a | b |\n\
                         |---|---|\n\
                         | 1 | 2 |";
-
-const HEADINGS: &str = "# Heading one, long enough that it wraps onto a second row at this size\n\
-                        Body text under it.\n\
-                        ## Heading two\n\
-                        ### Heading three\n\
-                        #### Heading four\n\
-                        ##### Heading five\n\
-                        ###### Heading six\n\
-                        Setext heading\n\
-                        ==============\n\
-                        Last body line.";
 
 const VAULT: &[(&str, &str)] = &[
     ("index.md", "# Index\n\nThe vault's front page.\n"),
@@ -142,12 +134,12 @@ const CATALOGUE: &[Scene] = &[
     Scene {
         name: "editor-headings",
         shows: "heading sizes H1 to H6 and setext, caret on body text so every `#` is hidden",
-        open: editor_headings,
+        open: headings::concealed,
     },
     Scene {
         name: "editor-heading-revealed",
         shows: "the caret on the wrapped H1: `# ` shows dimmed in the margin, and no text moves",
-        open: editor_heading_revealed,
+        open: headings::revealed,
     },
     Scene {
         name: "sidebar-vault",
@@ -442,37 +434,21 @@ const CATALOGUE: &[Scene] = &[
     Scene {
         name: "theme-picker",
         shows: "Select theme from cmd-shift-p, then down: the built-in rows, Flexoki Dark selected and previewed",
-        open: theme_picker,
+        open: command_palette::theme_picker,
     },
     Scene {
-        name: "markdown-blocks",
-        shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote",
-        open: markdown_blocks::concealed,
-    },
-    Scene {
-        name: "markdown-blocks-revealed",
-        shows: "the caret on a quote's first line: its > paints in the gutter, no text moved",
-        open: markdown_blocks::revealed,
-    },
-    Scene {
-        name: "code-blocks",
-        shows: "code blocks, caret in the first paragraph: neutral 16 px Menlo in body rows on one rounded background per block, fences hidden with their rows kept; top level with a long line on one row scrolled 240 px and clipped at the background, in a quote past its bars with a long line scrolled 120 px, in a list at the fence column, no language, indented; the language label right-aligned in the opening row; the pointer over the rust block shows its 3 px scroll bar, and the quoted block's bar lingers from its swipe on the test clock",
-        open: code_blocks::concealed,
-    },
-    Scene {
-        name: "code-blocks-revealed",
-        shows: "the caret in the rust block with a selection over two rows: both fences show and the rust label is gone, no row moved, the selection paints over the background and stops at its edges; the caret, scrolled out at column 0, paints nothing",
-        open: code_blocks::revealed,
-    },
-    Scene {
-        name: "code-blocks-wrap",
-        shows: "code_block_wrap on, written to settings.json after the open: every long line wraps inside its background, nothing is clipped, the quoted block wraps past its bars",
-        open: code_blocks::wrapped,
+        name: "todo-marks",
+        shows: "three TODOs in the warning colour from a decoration layer, one inside **bold** with the caret in it: its revealed `**` stay dimmed",
+        open: decorations::todo_marks,
     },
 ];
 
-pub(crate) fn catalogue() -> &'static [Scene] {
+pub(crate) fn catalogue() -> impl Iterator<Item = &'static Scene> {
     CATALOGUE
+        .iter()
+        .chain(&markdown_blocks::SCENES)
+        .chain(&code_blocks::SCENES)
+        .chain(&code_highlighting::SCENES)
 }
 
 fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {
@@ -545,32 +521,6 @@ fn editor_revealed_link(stage: &mut Stage) -> WindowHandle<AppShell> {
     stage.focus(window);
     let keys = format!("cmd-up {}ctrl-e {}", "down ".repeat(8), "left ".repeat(31));
     stage.keys(window, keys.trim_end());
-    window
-}
-
-fn editor_headings(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_note(HEADINGS);
-    stage.focus(window);
-    stage.keys(window, "cmd-down");
-    window
-}
-
-fn editor_heading_revealed(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_note(HEADINGS);
-    stage.focus(window);
-    let keys = format!("cmd-up {}", "right ".repeat(5));
-    stage.keys(window, keys.trim_end());
-    window
-}
-
-fn theme_picker(stage: &mut Stage) -> WindowHandle<AppShell> {
-    let window = stage.open_vault(&[("index.md", "# Index\n\nThe front page.\n")]);
-    stage.click_tree_row(window, 0.);
-    stage.focus(window);
-    stage.keys(window, "cmd-shift-p");
-    stage.type_text(window, "theme");
-    stage.keys(window, "enter");
-    stage.keys(window, "down");
     window
 }
 

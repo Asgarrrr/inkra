@@ -23,10 +23,7 @@ impl NoteStore {
                 (live.entry(id).map(|entry| entry.mtime), before)
             },
             // A rename's `moves` entry is ahead of `previous` until its rescan lands.
-            |id| match self.moves.get(&id) {
-                Some(moved) => moved.clone(),
-                None => previous.absolute(id),
-            },
+            |id| self.moves.resolve(id, previous),
         );
         for (id, _) in swaps.iter().filter(|(_, swap)| swap.flipped) {
             cx.emit(GoneChanged(*id));

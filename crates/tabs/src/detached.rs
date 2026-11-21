@@ -1,14 +1,13 @@
-//! A tab between groups: it leaves one with its back and forward stacks and enters another (splits spec, P4).
+//! A tab between groups: it leaves one with its history and enters another (splits spec, P4).
 
-use crate::history::Stack;
+use crate::history::History;
 use crate::{Place, Tab, TabId, Tabs};
 
 /// A tab out of every group, its place held as an inactive slot holds it.
 #[derive(Debug, Clone)]
 pub struct Detached<P, Q = P> {
     place: Q,
-    back: Stack<P>,
-    forward: Stack<P>,
+    history: History<P>,
 }
 
 /// What `take` returns: the tab, and the slot that now shows when the active tab left.
@@ -26,22 +25,10 @@ impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
             !self.list.is_empty(),
             "the only tab leaves with its group, never alone"
         );
-        let Tab {
-            place,
-            back,
-            forward,
-            ..
-        } = tab;
+        let Tab { place, history, .. } = tab;
         let shown = place.is_none().then(|| self.show_next());
         let place = place.unwrap_or_else(leave);
-        Some((
-            Detached {
-                place,
-                back,
-                forward,
-            },
-            shown,
-        ))
+        Some((Detached { place, history }, shown))
     }
 
     /// The group's one tab, its place what `leave` returns.
@@ -54,8 +41,7 @@ impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
         let tab = self.list.remove(0);
         Detached {
             place: leave(),
-            back: tab.back,
-            forward: tab.forward,
+            history: tab.history,
         }
     }
 
@@ -68,7 +54,7 @@ impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
         park: impl FnOnce() -> Q,
     ) -> (TabId, Q) {
         let id = self.insert(at, park);
-        self.set_active_history(detached.back, detached.forward);
+        self.set_active_history(detached.history);
         (id, detached.place)
     }
 
@@ -76,7 +62,7 @@ impl<P: Place + Clone, Q: Place<File = P::File>> Tabs<P, Q> {
     #[must_use]
     pub fn detached(detached: Detached<P, Q>) -> (Self, Q) {
         let mut tabs = Self::new();
-        tabs.set_active_history(detached.back, detached.forward);
+        tabs.set_active_history(detached.history);
         (tabs, detached.place)
     }
 }

@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use gpui::{Modifiers, RenderImage, TestAppContext, VisualTestContext, WindowHandle};
+use gpui::{Entity, Modifiers, RenderImage, TestAppContext, VisualTestContext, WindowHandle};
 use inkra_vault::EntryId;
 use inkra_vault::mem_fs::MemFs;
 
@@ -15,23 +15,25 @@ use super::{
 use super::{tab_files, view_of};
 use crate::images::{Slot, png};
 use crate::test_support::entry_id;
+use crate::vault::NoteStore;
 
-const PHOTO: &str = "/vault/photo.png";
-const PDF: &str = "/vault/report.pdf";
+pub(super) const PHOTO: &str = "/vault/photo.png";
+pub(super) const PDF: &str = "/vault/report.pdf";
 /// Tree rows: `a`, `photo.png`, `report.pdf`.
 const PHOTO_ROW: f32 = 1.;
 const PDF_ROW: f32 = 2.;
 
-struct Vault {
-    fs: Arc<MemFs>,
-    window: WindowHandle<AppShell>,
-    cx: VisualTestContext,
-    a: EntryId,
-    photo: EntryId,
+pub(super) struct Vault {
+    pub(super) fs: Arc<MemFs>,
+    pub(super) notes: Entity<NoteStore>,
+    pub(super) window: WindowHandle<AppShell>,
+    pub(super) cx: VisualTestContext,
+    pub(super) a: EntryId,
+    pub(super) photo: EntryId,
 }
 
 /// `a.md` showing, `photo.png` holding `photo` and `report.pdf` beside it.
-fn vault(cx: &mut TestAppContext, photo: Vec<u8>) -> Vault {
+pub(super) fn vault(cx: &mut TestAppContext, photo: Vec<u8>) -> Vault {
     let fs = Arc::new(MemFs::new());
     fs.insert_file("/vault/a.md", "alpha");
     fs.insert_bytes(PHOTO, photo);
@@ -42,6 +44,7 @@ fn vault(cx: &mut TestAppContext, photo: Vec<u8>) -> Vault {
     open(&window, &mut cx, a);
     Vault {
         fs,
+        notes,
         window,
         cx,
         a,
@@ -50,15 +53,15 @@ fn vault(cx: &mut TestAppContext, photo: Vec<u8>) -> Vault {
 }
 
 impl Vault {
-    fn click_photo(&mut self) {
+    pub(super) fn click_photo(&mut self) {
         click_row(&mut self.cx, PHOTO_ROW, Modifiers::none());
     }
 
-    fn image_shown(&mut self) -> Option<EntryId> {
+    pub(super) fn image_shown(&mut self) -> Option<EntryId> {
         image_shown(&self.window, &mut self.cx)
     }
 
-    fn drawn(&mut self, selector: &'static str) -> bool {
+    pub(super) fn drawn(&mut self, selector: &'static str) -> bool {
         self.cx.debug_bounds(selector).is_some()
     }
 
@@ -66,7 +69,7 @@ impl Vault {
         self.fs.reads(Path::new(PHOTO))
     }
 
-    fn held(&mut self) -> bool {
+    pub(super) fn held(&mut self) -> bool {
         let photo = self.photo;
         self.window
             .update(&mut self.cx, |shell, _, cx| {
@@ -104,15 +107,8 @@ impl Vault {
             .unwrap()
     }
 
-    fn check(&mut self) {
+    pub(super) fn check(&mut self) {
         check(&self.window, &mut self.cx);
-    }
-
-    /// An outside rename: the same file under `to`, so it keeps its id.
-    fn rename_outside(&mut self, from: &str, to: &str) {
-        self.fs.hard_link(Path::new(from), to);
-        self.fs.remove(Path::new(from));
-        self.cx.run_until_parked();
     }
 }
 
@@ -167,6 +163,20 @@ fn an_unreadable_image_shows_the_message(cx: &mut TestAppContext) {
     assert_eq!(vault.image_shown(), Some(vault.photo));
     assert!(vault.drawn("image-failed"));
     assert!(!vault.drawn("image-view"));
+    vault.check();
+}
+
+/// The failure is about its path: a vault change that leaves the path alone reads nothing.
+#[gpui::test]
+fn an_unreadable_image_is_not_read_again_when_another_file_changes(cx: &mut TestAppContext) {
+    let mut vault = vault(cx, b"not an image".to_vec());
+    vault.click_photo();
+
+    vault.fs.insert_file("/vault/b.md", "beta");
+    vault.cx.run_until_parked();
+
+    assert_eq!(vault.reads(), 1);
+    assert!(vault.drawn("image-failed"));
     vault.check();
 }
 
@@ -299,101 +309,5 @@ fn cmd_t_with_an_image_shown_opens_an_empty_tab(cx: &mut TestAppContext) {
         (vec![Some(vault.photo), None], 1)
     );
     assert!(!vault.held());
-    vault.check();
-}
-
-#[gpui::test]
-fn a_deleted_image_empties_its_tab(cx: &mut TestAppContext) {
-    let mut vault = vault(cx, png(40, 30));
-    keys(&mut vault.cx, "cmd-t");
-    vault.click_photo();
-
-    vault.fs.remove(Path::new(PHOTO));
-    vault.cx.run_until_parked();
-
-    assert_eq!(
-        tab_files(&vault.window, &mut vault.cx),
-        (vec![Some(vault.a), None], 1)
-    );
-    assert!(!vault.held());
-    vault.check();
-}
-
-#[gpui::test]
-fn a_deleted_image_in_history_only_is_forgotten(cx: &mut TestAppContext) {
-    let mut vault = vault(cx, png(40, 30));
-    vault.click_photo();
-    click_row(&mut vault.cx, 0., Modifiers::none());
-
-    vault.fs.remove(Path::new(PHOTO));
-    vault.cx.run_until_parked();
-
-    let files: Vec<EntryId> = vault
-        .window
-        .update(&mut vault.cx, |shell, _, _| {
-            shell.center().tabs.files().collect()
-        })
-        .unwrap();
-    assert!(!files.contains(&vault.photo));
-    assert_eq!(showing(&vault.window, &mut vault.cx), Some(vault.a));
-    vault.check();
-}
-
-/// The walk after the first deletion records the vault's `departures`; the second must renew it.
-#[gpui::test]
-fn an_image_deleted_after_an_unheld_file_is_forgotten(cx: &mut TestAppContext) {
-    let mut vault = vault(cx, png(40, 30));
-    vault.click_photo();
-    click_row(&mut vault.cx, 0., Modifiers::none());
-    vault.fs.remove(Path::new(PDF));
-    vault.cx.run_until_parked();
-
-    vault.fs.remove(Path::new(PHOTO));
-    vault.cx.run_until_parked();
-
-    let files: Vec<EntryId> = vault
-        .window
-        .update(&mut vault.cx, |shell, _, _| {
-            shell.center().tabs.files().collect()
-        })
-        .unwrap();
-    assert!(!files.contains(&vault.photo));
-    vault.check();
-}
-
-/// The open editor stays on the note; the next display shows the file as an image.
-#[gpui::test]
-fn a_note_renamed_to_a_png_under_its_tab_shows_as_an_image_once_shown_again(
-    cx: &mut TestAppContext,
-) {
-    let mut vault = vault(cx, png(40, 30));
-
-    vault.rename_outside("/vault/a.md", "/vault/a.png");
-    let still_bound = showing(&vault.window, &mut vault.cx);
-    vault.check();
-    keys(&mut vault.cx, "cmd-t ctrl-tab");
-
-    assert_eq!(still_bound, Some(vault.a));
-    assert_eq!(vault.image_shown(), Some(vault.a));
-    assert!(vault.drawn("image-failed"), "a note's text is no image");
-    vault.check();
-}
-
-/// The image stays drawn; the next display has no buffer for the note, so it loads the file's bytes, which still decode.
-#[gpui::test]
-fn a_png_renamed_to_a_note_under_its_tab_still_shows_the_image_once_shown_again(
-    cx: &mut TestAppContext,
-) {
-    let mut vault = vault(cx, png(40, 30));
-    vault.click_photo();
-
-    vault.rename_outside(PHOTO, "/vault/photo.md");
-    let still_drawn = vault.drawn("image-view");
-    vault.check();
-    keys(&mut vault.cx, "cmd-t ctrl-tab");
-
-    assert!(still_drawn);
-    assert_eq!(vault.image_shown(), Some(vault.photo));
-    assert!(vault.drawn("image-view"));
     vault.check();
 }

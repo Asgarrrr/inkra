@@ -1,6 +1,6 @@
-use super::no_min;
+use super::{BACKLINKS, CATALOG, FILES, no_min};
 use crate::{
-    Axis, GroupId, Layout, Member, Rect, Shape, Side, SplitDirection, StoredDock, Surface, View,
+    Axis, GroupId, Layout, Member, Rect, Shape, Side, SplitDirection, StoredDock, Surface, ViewId,
     kept_active, restore_views,
 };
 
@@ -210,56 +210,63 @@ fn a_tab_naming_no_view_before_the_active_shifts_it() {
     };
     for (active, kept) in [(2, 1), (0, 0)] {
         assert_eq!(
-            restore_views([&[dock(active)], &[]]),
-            [vec![(vec![View::Files, View::Backlinks], kept)], Vec::new()]
+            restore_views([&[dock(active)], &[]], CATALOG),
+            [vec![(vec![FILES, BACKLINKS], kept)], Vec::new()]
         );
     }
 }
 
 #[test]
 fn restore_views_per_group_rules() {
-    let views = restore_views([
-        &[
-            stored(&["graph", "files"], 1),
-            stored(&["files", "backlinks"], 1),
+    let views = restore_views(
+        [
+            &[
+                stored(&["graph", "files"], 1),
+                stored(&["files", "backlinks"], 1),
+            ],
+            &[stored(&["backlinks"], 0)],
         ],
-        &[stored(&["backlinks"], 0)],
-    ]);
+        CATALOG,
+    );
     assert_eq!(
         views,
         [
-            vec![(vec![View::Files], 0), (vec![View::Backlinks], 0)],
+            vec![(vec![FILES], 0), (vec![BACKLINKS], 0)],
             vec![(Vec::new(), 0)],
         ]
     );
 
-    let views = restore_views([&[stored(&[], 0), stored(&["backlinks"], 0)], &[]]);
+    let views = restore_views([&[stored(&[], 0), stored(&["backlinks"], 0)], &[]], CATALOG);
     assert_eq!(
         views,
-        [
-            vec![(vec![View::Files], 0), (vec![View::Backlinks], 0)],
-            Vec::new()
-        ]
+        [vec![(vec![FILES], 0), (vec![BACKLINKS], 0)], Vec::new()]
     );
 
-    let views = restore_views([&[], &[]]);
-    assert_eq!(
-        views,
-        [
-            vec![(vec![View::Files], 0)],
-            vec![(vec![View::Backlinks], 0)]
-        ]
-    );
+    let views = restore_views([&[], &[]], CATALOG);
+    assert_eq!(views, [vec![(vec![FILES], 0)], vec![(vec![BACKLINKS], 0)]]);
 
-    let views = restore_views([
-        &[stored(&["backlinks", "graph", "files"], 2)],
-        &[stored(&[], 0), stored(&["graph"], 4)],
-    ]);
+    let views = restore_views(
+        [
+            &[stored(&["backlinks", "graph", "files"], 2)],
+            &[stored(&[], 0), stored(&["graph"], 4)],
+        ],
+        CATALOG,
+    );
     assert_eq!(
         views,
         [
-            vec![(vec![View::Backlinks, View::Files], 1)],
+            vec![(vec![BACKLINKS, FILES], 1)],
             vec![(Vec::new(), 0), (Vec::new(), 0)],
         ]
     );
+}
+
+#[test]
+fn restore_views_takes_the_catalog() {
+    const A: ViewId = ViewId::new("a");
+    const B: ViewId = ViewId::new("b");
+    const C: ViewId = ViewId::new("c");
+    let catalog = [(A, Side::Right), (B, Side::Left), (C, Side::Right)];
+    let views = restore_views([&[stored(&["files"], 0)], &[]], &catalog);
+    assert_eq!(views, [vec![(vec![B], 0)], vec![(vec![A, C], 0)]]);
 }

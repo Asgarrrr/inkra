@@ -50,7 +50,11 @@ fn an_image_shown_lists_the_notes_that_embed_it(cx: &mut TestAppContext) {
 
     let sources = window
         .update(cx, |shell, _, cx| {
-            shell.panes().backlinks.read(cx).source_names()
+            shell
+                .backlinks_panel()
+                .expect("backlinks is active")
+                .read(cx)
+                .source_names()
         })
         .expect("the shell is open");
     assert_eq!(sources, ["a"]);
@@ -67,7 +71,11 @@ fn the_panel_follows_the_note_showing(cx: &mut TestAppContext) {
     let sources = |window: &gpui::WindowHandle<crate::shell::AppShell>, cx: &mut TestAppContext| {
         window
             .update(cx, |shell, _, cx| {
-                shell.panes().backlinks.read(cx).source_names()
+                shell
+                    .backlinks_panel()
+                    .expect("backlinks is active")
+                    .read(cx)
+                    .source_names()
             })
             .expect("the shell is open")
     };

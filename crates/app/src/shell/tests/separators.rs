@@ -11,8 +11,8 @@ use super::edge_drops::hold;
 use super::splits::{centre, close, last, split};
 use super::tab_bar::{click, press};
 use super::{ab_focused, keys, open};
+use crate::backlinks::MoveBacklinksToOtherDock;
 use crate::shell::AppShell;
-use crate::shell::docks::MoveBacklinksToOtherDock;
 use crate::shell::split::SplitDown;
 use crate::theme;
 

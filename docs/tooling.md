@@ -140,7 +140,11 @@ drops a whole file's tests and still compiles green.
 - `criterion` runs without its default `rayon` and `plotters`: no baseline is
   committed and no HTML report is opened. `cargo_bench_support` stays, because
   `cargo bench` refuses a `harness = false` binary without it.
-- `inkra-text` and `inkra-markdown` set `bench = false` on their lib. Otherwise `cargo bench` runs
+- `inkra-app --features bench` is the exception. gpui's `bench-support` turns
+  on criterion's `default` and `html_reports` through Zed's workspace entry.
+  Cargo features only add, so we cannot turn them off. The rest of the
+  workspace keeps the reduced set.
+- Every crate with benches sets `bench = false` on its lib. Otherwise `cargo bench` runs
   the lib as a bench harness and passes it criterion flags like `--quick`,
   which it rejects.
 

@@ -1,4 +1,4 @@
-crates/app/src/editor/layout/shape.rs	464
-crates/app/src/editor/mod.rs	477
-crates/app/src/shot/scenes.rs	641
+crates/app/src/editor/layout/shape.rs	432
+crates/app/src/editor/mod.rs	409
+crates/app/src/shot/scenes.rs	591
 crates/app/src/shot/stage.rs	409

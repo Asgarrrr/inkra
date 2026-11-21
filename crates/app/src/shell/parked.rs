@@ -1,7 +1,7 @@
 //! The place an inactive tab holds in `Tabs`: its view kept as anchors so edits elsewhere move it (tabs spec, A2).
 
 use gpui::App;
-use inkra_layout::View;
+use inkra_layout::ViewId;
 use inkra_vault::EntryId;
 
 use super::Shown;
@@ -15,7 +15,7 @@ pub(super) enum Parked {
     #[default]
     Empty,
     File(OnFile<ParkedView>),
-    View(View),
+    View(ViewId),
 }
 
 impl inkra_tabs::Place for Parked {
@@ -69,7 +69,7 @@ impl Parked {
         Some(on.view.as_ref()?.peek(cx))
     }
 
-    pub(super) fn view(&self) -> Option<View> {
+    pub(super) fn view(&self) -> Option<ViewId> {
         match self {
             Self::View(view) => Some(*view),
             Self::Empty | Self::File(_) => None,

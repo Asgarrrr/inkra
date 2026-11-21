@@ -232,6 +232,113 @@ fn version_starts_at_zero_and_moves_with_an_edit() {
     assert_ne!(buffer.version(), Version::default());
 }
 
+#[test]
+fn undo_and_redo_increase_the_edit_mark() {
+    let mut buffer = Buffer::new("abc");
+    let start = buffer.edit_mark();
+    assert_eq!(start, EditMark::default());
+    buffer.transact(|buffer| buffer.insert(at(3), "x"));
+    let edited = buffer.edit_mark();
+    buffer.undo();
+    let undone = buffer.edit_mark();
+    buffer.redo();
+    let redone = buffer.edit_mark();
+    assert!(start < edited && edited < undone && undone < redone);
+
+    buffer.transact(|_| {});
+    assert_eq!(
+        buffer.edit_mark(),
+        redone,
+        "an empty transaction edits nothing"
+    );
+}
+
+#[test]
+fn more_than_256_splices_past_a_mark_is_none() {
+    let mut buffer = Buffer::new("");
+    let start = buffer.edit_mark();
+    buffer.transact(|buffer| {
+        for _ in 0..256 {
+            buffer.insert(at(0), "x");
+        }
+    });
+    assert_eq!(buffer.edits_since(start).map(Iterator::count), Some(256));
+
+    buffer.transact(|buffer| buffer.insert(at(0), "x"));
+
+    assert!(buffer.edits_since(start).is_none());
+    assert_eq!(
+        buffer.edits_since(buffer.edit_mark()).map(Iterator::count),
+        Some(0)
+    );
+}
+
+#[test]
+fn every_buffer_has_its_own_id_and_keeps_it_through_edits() {
+    let mut buffer = Buffer::new("abc");
+    let other = Buffer::new("abc");
+    let id = buffer.id();
+    assert_ne!(id, other.id());
+
+    buffer.transact(|buffer| buffer.insert(at(3), "x"));
+    buffer.undo();
+
+    assert_eq!(buffer.id(), id);
+}
+
+#[test]
+fn a_splice_maps_an_offset_by_where_it_falls() {
+    let splice = Splice {
+        at: at(2),
+        removed_len: 3,
+        inserted_len: 1,
+    };
+
+    assert_eq!(splice.map(at(1), Bias::Right), at(1));
+    assert_eq!(splice.map(at(3), Bias::Left), at(2));
+    assert_eq!(splice.map(at(3), Bias::Right), at(3));
+    assert_eq!(splice.map(at(5), Bias::Left), at(3));
+    assert_eq!(splice.map(at(9), Bias::Left), at(7));
+}
+
+#[test]
+fn composing_splices_spans_only_the_bytes_they_touched() {
+    let splice = |at_: usize, removed_len, inserted_len| Splice {
+        at: at(at_),
+        removed_len,
+        inserted_len,
+    };
+    let insert_10_at_10 = splice(10, 0, 10);
+    for (splices, composed) in [
+        (vec![], None),
+        (vec![splice(10, 0, 3)], Some(splice(10, 0, 3))),
+        (vec![splice(10, 4, 0)], Some(splice(10, 4, 0))),
+        (
+            vec![splice(200, 0, 5), splice(0, 0, 100)],
+            Some(splice(0, 200, 305)),
+        ),
+        (
+            vec![insert_10_at_10, splice(15, 10, 0)],
+            Some(splice(10, 5, 5)),
+        ),
+        (
+            vec![insert_10_at_10, splice(5, 20, 3)],
+            Some(splice(5, 10, 3)),
+        ),
+    ] {
+        assert_eq!(Splice::compose(splices.clone()), composed, "{splices:?}");
+    }
+}
+
+#[test]
+#[should_panic(expected = "is past")]
+fn a_mark_from_the_future_panics() {
+    let mut edited = Buffer::new("");
+    edited.transact(|buffer| buffer.insert(at(0), "x"));
+
+    let _ = Buffer::new("").edits_since(edited.edit_mark());
+}
+
 /// Regression pin: `close` merges by extending the previous transaction, so its id must live
 /// on the edit, not the transaction — else a merged edit would report "saved" over unsaved text.
 #[test]

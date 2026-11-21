@@ -29,21 +29,35 @@ impl AppShell {
     }
 
     /// Our own write's echo reloads equal colours, which `install` ignores.
-    pub(super) fn config_changed(&mut self, paths: &[RelPath], cx: &mut Context<Self>) {
+    pub(super) fn config_changed(
+        &mut self,
+        paths: &[RelPath],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !paths.iter().any(|path| self.themes.concerns(path)) {
             return;
         }
         let Some((fs, root)) = self.vault_root(cx) else {
             return;
         };
-        self.themes.reload(cx.spawn(async move |shell, cx| {
-            let resolved = cx
-                .background_spawn(async move { store::load(&*fs, &root).await })
-                .await;
-            shell
-                .update(cx, |shell, cx| shell.adopt_theme(resolved, cx))
-                .ok();
-        }));
+        let picks = self.themes.picks();
+        self.themes
+            .reload(cx.spawn_in(window, async move |shell, cx| {
+                let resolved = cx
+                    .background_spawn(async move { store::load(&*fs, &root).await })
+                    .await;
+                shell
+                    .update_in(cx, |shell, window, cx| {
+                        if let Some(switches) = &resolved.features {
+                            shell.apply_switches(switches, window, cx);
+                        }
+                        if shell.themes.picks() == picks {
+                            shell.adopt_theme(resolved, cx);
+                        }
+                    })
+                    .ok();
+            }));
     }
 
     pub(super) fn select_theme(

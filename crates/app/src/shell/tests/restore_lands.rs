@@ -7,7 +7,7 @@ use std::sync::Arc;
 use gpui::{
     Bounds, Focusable, TestAppContext, VisualTestContext, WindowBounds, WindowHandle, WindowOptions,
 };
-use inkra_layout::{Axis, Member, Side, View};
+use inkra_layout::{Axis, Member, Side};
 use inkra_text::ByteOffset;
 use inkra_vault::mem_fs::MemFs;
 use inkra_vault::{EntryId, Fs, Vault};
@@ -16,11 +16,14 @@ use super::dock_menu::{default_docks, docks, side_of};
 use super::session_writes::{SESSION, saved_tabs, tab, wait};
 use super::splits::{centre, close, editor_in, last, shown_in, tabs_in};
 use super::{check, tab_files};
+use crate::backlinks::BACKLINKS;
 use crate::bootstrap::{Launch, read_session, root};
+use crate::feature::Registry;
 use crate::images::png;
 use crate::keymap::key_bindings;
 use crate::restore::{SavedAxis, SavedFileTab, SavedGroup, SavedMember, SavedTab, Session};
 use crate::shell::AppShell;
+use crate::shell::FILES;
 use crate::shell::column::Empty;
 use crate::shell::session::THROTTLE;
 use crate::test_support;
@@ -42,7 +45,7 @@ pub(super) fn save(fs: &MemFs, active: usize, tabs: Vec<SavedFileTab>) -> String
 }
 
 /// One tab on `a.md`, and `left` as the left dock.
-fn save_docks(fs: &MemFs, left: SavedMember) {
+pub(super) fn save_docks(fs: &MemFs, left: SavedMember) {
     let center = notes_group(vec![tab("a.md", 0, 0)], 0);
     let session = Session::new("/vault".into(), 0, center, Some(left), None, [true, true]);
     save_text(fs, session.encode().unwrap());
@@ -87,14 +90,15 @@ pub(super) fn launch(
     fs: &Arc<MemFs>,
 ) -> (WindowHandle<AppShell>, VisualTestContext) {
     let launched = Launch::Vault(Vault::new(Path::new("/vault")), Some(SESSION.into()), None);
-    launch_as(cx, fs, launched)
+    launch_as(cx, fs, launched, Registry::default())
 }
 
-/// `launched` on `fs`, unscanned; the root focused, nothing run yet.
+/// `launched` on `fs` with `features`, unscanned; the root focused, nothing run yet.
 pub(super) fn launch_as(
     cx: &mut TestAppContext,
     fs: &Arc<MemFs>,
     launched: Launch,
+    features: Registry,
 ) -> (WindowHandle<AppShell>, VisualTestContext) {
     cx.update(|cx| cx.bind_keys(key_bindings()));
     let fs = Arc::clone(fs) as Arc<dyn Fs>;
@@ -108,7 +112,7 @@ pub(super) fn launch_as(
                 },
                 |window, cx| {
                     let opened = read_session(&fs, &launched, cx);
-                    root(fs, launched, opened, window, cx)
+                    root(fs, launched, opened, features, window, cx)
                 },
             )
         })
@@ -385,8 +389,8 @@ fn a_restore_landing_under_a_picker_focuses_the_note_on_its_dismissal(cx: &mut T
     assert!(editor_focused(&window, &mut cx));
 }
 
-fn backlinks_left() -> SavedMember {
-    let views = [View::Files, View::Backlinks].map(|view| SavedTab::View {
+pub(super) fn backlinks_left() -> SavedMember {
+    let views = [FILES, BACKLINKS].map(|view| SavedTab::View {
         view: view.name().to_owned(),
     });
     SavedMember::Group(SavedGroup {
@@ -402,7 +406,7 @@ fn a_saved_layout_is_restored(cx: &mut TestAppContext) {
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
 
-    assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
+    assert_eq!(side_of(&window, &mut cx, BACKLINKS), Some(Side::Left));
     assert!(cx.debug_bounds("dock-bar-left").is_some());
 }
 
@@ -414,7 +418,7 @@ fn a_saved_layout_is_drawn_by_the_first_frame(cx: &mut TestAppContext) {
     let (window, mut cx) = launch(cx, &fs);
 
     assert!(cx.debug_bounds("dock-bar-left").is_some());
-    assert_eq!(side_of(&window, &mut cx, View::Backlinks), Side::Left);
+    assert_eq!(side_of(&window, &mut cx, BACKLINKS), Some(Side::Left));
 }
 
 /// The restore reuses the session `bootstrap::read_session` read before the window opened.
@@ -658,7 +662,8 @@ fn an_image_deleted_before_the_landing_closes_its_tab(cx: &mut TestAppContext) {
         view: None,
     };
     save(&fs, 0, vec![image, tab("a.md", 0, 0)]);
-    let gate = fs.block_load("/vault/a.md");
+    // An image lands with no read; the note holds the landing. Every load: the index loads it too.
+    let gate = fs.hold_loads("/vault/a.md");
     let (window, mut cx) = launch(cx, &fs);
     cx.run_until_parked();
 

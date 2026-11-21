@@ -190,6 +190,14 @@ Decisions made with reasons, so they are not relitigated from scratch:
   already use a `GraphemeCursor`; under a rope, they must feed it chunks
   (~40-60 lines) — not a dependency swap. Both `ropey` and `crop` were outside our 12-month freshness
   rule as of 2026-09-20; adopting either is a deliberate exception.
+  Code highlighting added two consumers on 2026-11-16 (its spec, D10).
+  `inkra_highlight::backlog` copies the pending code blocks' content lines
+  out of the buffer for the syntax layer's background task, and
+  `lex_backlog` lexes that copy on the background executor. Under a rope,
+  `backlog` would take a snapshot instead, and `lex_backlog` would read the
+  lines from it. One copy holds at most `TASK_BYTES` (32 KiB) of blocks, or
+  one block of at most `BLOCK_LIMIT` (256 KiB), so it never triggers the rope
+  alone.
 - **Caching offset conversion** short of a rope. Rejected. A cached last
   `(byte, utf16)` pair only helps sequential typing, already the cheap case,
   and does nothing for select-all, click-into-middle, or protocol queries at

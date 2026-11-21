@@ -1,7 +1,7 @@
 use proptest::prelude::*;
 use proptest::sample::Index;
 
-use super::{Fake, Harness, Op, TabId, entries, op, ops, resolved, run, three};
+use super::{Fake, Harness, Op, TabId, histories, op, ops, resolved, run, three};
 use crate::HISTORY;
 
 /// Weighted toward closes and reopens, so a reopen often finds an entry and a bar shorter than its index.
@@ -20,12 +20,7 @@ pub(super) fn closed_entries(harness: &Harness) -> Vec<(Fake, [Vec<Fake>; 2])> {
         .tabs
         .closed
         .iter()
-        .map(|entry| {
-            (
-                entry.place.clone(),
-                [entries(&entry.back), entries(&entry.forward)],
-            )
-        })
+        .map(|entry| (entry.place.clone(), histories(&entry.history)))
         .collect()
 }
 

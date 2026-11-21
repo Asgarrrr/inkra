@@ -44,6 +44,7 @@ fn a_caret_in_the_marker_hangs_left_of_the_text(cx: &mut TestAppContext) {
             assert_eq!(inside.size.height, px(H1));
             assert_x(layout.caret_bounds(at(0)).origin.x, -2. * H1_GLYPH);
             assert_eq!(layout.caret_bounds(at(2)).origin.x, px(0.));
+            assert_x(layout.prefix_shown(0)[0].1, -2. * H1_GLYPH);
         })
         .unwrap();
 }

@@ -53,11 +53,18 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   Zero missed is the bar; exit 3 on the known `Buffer::clip` timeout is expected.
   After changing `vault` logic, run the diff command with
   `-p inkra-vault --test-package inkra-vault -f 'crates/vault/src/**/*.rs'`.
+  After changing `highlight` logic, run the diff command with
+  `-p inkra-highlight --test-package inkra-highlight -f 'crates/highlight/src/**/*.rs'`.
+  After changing `app` logic, run it with `-j 2 -p inkra-app --test-package inkra-app
+  -f 'crates/app/src/**/*.rs' -- --lib -- editor field shell shot theme`, then rerun any miss on
+  the full suite. The full suite times a mutant out after ~6 min, and a runaway layout walk
+  fills 48 GB well before that.
 - compare: `./scripts/bench-compare.sh [--sizes 500,5000,50000] [--runs 5] [--apps inkra,obsidian]`
   — Inkra vs Obsidian measured from outside; method and results in `docs/benchmarks.md`.
   Quit Obsidian first; it runs in an isolated profile and never touches the user's.
 - bench: `cargo bench -p inkra-text -- --quick` for `Buffer` hot paths,
-  `-p inkra-markdown` for `parse` — before/after comparison, not a gate.
+  `-p inkra-markdown` for `parse`, `-p inkra-app --features bench --bench layout` for one
+  keystroke's or caret move's `shape_document` — before/after comparison, not a gate.
 - gpui is a git dependency pinned by `rev`; cargo fetches it. `vendor/zed-reference`
   is gitignored, for reading only: `./scripts/vendor-gpui.sh` checks out the rev in `Cargo.lock`.
 
@@ -68,11 +75,14 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   `inkra-markdown` depends on `inkra-text` only; `app` depends on it.
   `inkra-index` depends on `vault`, `markdown` and `text`; `app` depends on it.
   `inkra-tabs` and `inkra-layout` depend on no workspace crate; `app` depends on both.
-- `text`, `editor`, `vault`, `markdown`, `index`, `tabs` and `layout` have no gpui dependency; `check.sh`
+  `inkra-highlight` depends on `inkra-text` and `inkra-markdown`, plus `inkra-editor`
+  as a dev-dependency for its model test and benches; `app` depends on it.
+- `text`, `editor`, `vault`, `markdown`, `index`, `tabs`, `layout` and `highlight` have no gpui dependency; `check.sh`
   enforces it for every workspace member except `inkra-app`.
 - Where code goes:
   - no layout, filesystem or clock → `text` (the text) or `editor` (editing it)
   - parsing markdown into styled ranges → `markdown`; never a colour or a pixel
+  - lexing code into token classes → `highlight`; never a colour
   - resolving links, backlinks, search → `index`; it reads no file
   - deciding which notes to load, which load is superseded, when words merge → `index` (`LiveIndex`)
   - which tab is active, what a close activates, which place back and forward reach, what `⌘⇧T`
@@ -86,7 +96,8 @@ Everything in this repo — docs, comments, commits, identifiers — is English.
   - network → `app`, until a crate earns it
   - a reusable piece of chrome (row, icon, button) → `app/src/ui/`; a view composes it and keeps its own handlers
 - `inkra-app` is a library with two entry points (`main.rs`, `examples/shot.rs`);
-  `examples/seed_session.rs` writes the session `scripts/screenshot.sh` opens. Views stay `pub(crate)`. An example touching a feature-gated module needs
+  `examples/seed_session.rs` writes the session `scripts/screenshot.sh` opens; `benches/layout.rs`
+  drives the `bench`-gated `inkra_app::bench`. Views stay `pub(crate)`. An example touching a feature-gated module needs
   `required-features`, or `cargo test` breaks.
 - Area rules load on demand from `.claude/rules/` when you read the matching
   files: editor, shell and sidebar, vault, app tests, gpui.
@@ -128,13 +139,16 @@ Read the spec before changing its area:
 - `docs/superpowers/specs/2026-09-23-markdown-live-preview-design.md` —
   markdown styling and concealment
 - `docs/superpowers/specs/2026-09-30-markdown-blocks-design.md` — quote
-  gutters and bars, code backgrounds, task boxes
+  gutters and bars, code backgrounds; its S3 is superseded by
+  `2026-11-16-task-boxes-design.md` — the box, the click, the strike, `⌘L`; list items in the
+  gutter: slots, nesting, an item's other lines
 - `docs/superpowers/specs/2026-11-07-code-blocks-design.md` — fenced and
   indented blocks: fence conceals, `CodeBlock`, `CODE_BLOCK`, the background, the label
 - `docs/superpowers/specs/2026-11-07-code-block-scroll-design.md` — a code block's
   horizontal scroll; replaces decision 5 of the code-blocks spec
-- `docs/superpowers/specs/2026-11-11-code-highlighting-design.md` — highlighting
-  in code blocks: the library choice, token classes, the per-block cache
+- `docs/superpowers/specs/2026-11-14-code-highlighting-design.md` — highlighting
+  in code blocks: our own lexers in `inkra-highlight`, token classes, the `syntax` layer,
+  large blocks; `2026-11-11-code-highlighting-design.md` is the superseded tree-sitter pick
 - `docs/superpowers/specs/2026-09-23-soft-wrap-design.md` — rows, wrap, caret
 - `docs/superpowers/specs/2026-09-24-links-and-backlinks-design.md` — `inkra-index`,
   resolution, `IndexSync` (was `LinkSync`), following links, the backlinks panel
@@ -230,6 +244,8 @@ Read the spec before changing its area:
   batches: opaque offsets, positions vs lengths, typed UTF-16 ranges at the protocol boundary
 - `docs/superpowers/specs/2026-11-02-perf-batch-design.md` — performance batch 2: the
   baseline, carried shaped lines, painting inside the content mask
+- `docs/superpowers/specs/2026-11-15-incremental-draw-runs-design.md` — a keystroke carries
+  clean lines: `Placed`, line-relative `LineLayout`, the dirty set, `Moved`, the oracle, the layout bench
 - Dropped candidates, not to be proposed again unchanged:
   `2026-09-30-note-index-read-interface-design.md`, `2026-09-30-own-save-echo-design.md`
 - `docs/superpowers/specs/2026-09-20-inkra-vault-design.md` — `Fs`, identity

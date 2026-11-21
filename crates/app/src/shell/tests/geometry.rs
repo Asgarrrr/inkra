@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext, WindowHandle};
-use inkra_layout::{Axis, GroupId, Side, View};
+use inkra_layout::{Axis, GroupId, Side};
 use inkra_vault::mem_fs::MemFs;
 
 use super::splits::{close, last};
 use super::{ab_focused, no_vault, open};
+use crate::backlinks::BACKLINKS;
 use crate::shell::AppShell;
 use crate::theme;
 
@@ -36,7 +37,7 @@ fn a_group_fills_the_room_of_its_own_surface(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     window
         .update(&mut cx, |shell, window, cx| {
-            shell.reveal(View::Backlinks, window, cx);
+            shell.reveal(BACKLINKS, window, cx);
         })
         .unwrap();
     cx.run_until_parked();
@@ -68,7 +69,7 @@ fn the_right_dock_counts_both_insets(cx: &mut TestAppContext) {
     open(&window, &mut cx, a);
     window
         .update(&mut cx, |shell, window, cx| {
-            shell.reveal(View::Backlinks, window, cx);
+            shell.reveal(BACKLINKS, window, cx);
         })
         .unwrap();
     cx.run_until_parked();

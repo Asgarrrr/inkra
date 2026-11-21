@@ -3,7 +3,7 @@
 use std::fmt::Display;
 
 use gpui::{Context, ScrollHandle, Task, Window};
-use inkra_layout::{GroupId, SplitDirection, Surface, View};
+use inkra_layout::{GroupId, SplitDirection, Surface, ViewId};
 use inkra_tabs::{TabId, Tabs};
 
 use super::parked::Parked;
@@ -43,7 +43,7 @@ impl Group {
     ///
     /// # Panics
     /// As `Tabs::restored`: on no views, or `active` out of range.
-    pub(super) fn holding(views: &[View], active: usize) -> Self {
+    pub(super) fn holding(views: &[ViewId], active: usize) -> Self {
         let tabs = Tabs::restored(views.iter().copied().map(Parked::View).collect(), active);
         Self::with(tabs, Shown::View(views[active]))
     }
@@ -66,14 +66,18 @@ impl Group {
         }
     }
 
-    /// The view each tab holds, in tab order; a tab holding none is skipped.
-    pub(super) fn views(&self) -> impl Iterator<Item = (TabId, View)> + '_ {
-        self.tabs.iter().filter_map(|tab| {
-            let view = tab
-                .place()
-                .map_or_else(|| self.shown.view(), Parked::view)?;
-            Some((tab.id(), view))
+    /// Every tab in tab order, with the view it holds; `None` for a note's or an empty tab.
+    pub(super) fn tab_views(&self) -> impl Iterator<Item = (TabId, Option<ViewId>)> + '_ {
+        self.tabs.iter().map(|tab| {
+            let view = tab.place().map_or_else(|| self.shown.view(), Parked::view);
+            (tab.id(), view)
         })
+    }
+
+    /// The view each tab holds, in tab order; a tab holding none is skipped.
+    pub(super) fn views(&self) -> impl Iterator<Item = (TabId, ViewId)> + '_ {
+        self.tab_views()
+            .filter_map(|(tab, view)| Some((tab, view?)))
     }
 }
 

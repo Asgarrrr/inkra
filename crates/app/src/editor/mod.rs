@@ -5,11 +5,13 @@ pub(crate) mod layout;
 mod motion;
 mod mouse;
 mod parked;
-mod parses;
+pub(crate) mod parses;
+mod pin;
 mod reload;
 mod swap;
 #[cfg(test)]
 mod tests;
+mod view_state;
 mod viewport;
 
 use std::ops::Range;
@@ -26,6 +28,7 @@ use inkra_editor::{ParkedSelection, Selection};
 use inkra_markdown::{Link, Markdown, touched};
 use inkra_text::{Bias, Buffer, ByteOffset, Version};
 
+use crate::decorations;
 use crate::open::Open;
 use crate::text_input::{self, InputHost, Mode, TextInput};
 use crate::theme;
@@ -33,6 +36,7 @@ use element::TextElement;
 use viewport::{Reveal, Viewport};
 
 pub(crate) use parked::ParkedView;
+pub(crate) use view_state::ViewState;
 pub(crate) use viewport::TopLine;
 
 /// A link the user asked to follow: ⌘-click or ⌘↵ here, ⌘⇧-click or ⌘⇧↵ in a new tab.
@@ -43,29 +47,6 @@ pub(crate) struct LinkFollowed {
 }
 
 impl EventEmitter<LinkFollowed> for EditorView {}
-
-/// What a tab puts back on its note: the selection and the text on top (tabs spec, A2).
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ViewState {
-    pub(crate) selection: Selection,
-    pub(crate) top: TopLine,
-    /// Each scrolled block's start and offset; never saved to disk.
-    pub(crate) scrolls: Vec<(ByteOffset, Pixels)>,
-}
-
-impl ViewState {
-    /// Onto `buffer`'s graphemes, tail then head, so direction and goal survive.
-    fn clipped(self, buffer: &Buffer) -> Self {
-        let clip = |offset| buffer.clip_grapheme(offset, Bias::Left);
-        let mut selection = Selection::at(clip(self.selection.tail()));
-        selection.set_head(clip(self.selection.head()), self.selection.goal());
-        Self {
-            selection,
-            top: self.top.clipped(buffer),
-            scrolls: self.scrolls,
-        }
-    }
-}
 
 pub(crate) struct EditorView {
     input: TextInput,
@@ -132,10 +113,10 @@ impl EditorView {
             (Selection::at(ByteOffset::new(0)), None, Vec::new()),
             |view| (view.selection, Some(view.top), view.scrolls),
         );
-        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
-        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         // Reset, not compared: versions are per buffer, so two notes can share one.
         self.parsed_at = None;
+        // Clears the layout too: `reveal_cursor` would scroll by the old note's geometry.
+        self.swap_view(top, &scrolls, |input| input.rebind(buffer, selection), cx);
         self.refresh(cx);
     }
 
@@ -146,13 +127,13 @@ impl EditorView {
         ]
     }
 
-    fn markdown(&self) -> &Markdown {
+    fn markdown(&self) -> &Rc<Markdown> {
         &self.markdown
     }
 
-    /// Parses only when the buffer moved since the last parse; the block scrolls sync on every
-    /// call, so never inside a buffer update.
+    /// Parses only on a new version; decorations and block scrolls sync always: never in an update.
     fn refresh(&mut self, cx: &mut App) {
+        decorations::sync(self.input.buffer(), cx);
         let version = self.input.buffer().read(cx).version();
         if self.parsed_at != Some(version) {
             self.markdown = parses::parsed(self.input.buffer(), cx);
@@ -164,6 +145,8 @@ impl EditorView {
                     self.input.reset_state(peeked);
                 }
             }
+            // An edit places its caret on text not yet parsed (task boxes spec, D2).
+            self.snap_selection(cx);
         }
         let dropped = self.scrolls.sync(self.input.buffer().read(cx), |offset| {
             self.is_block_start(offset)
@@ -175,48 +158,6 @@ impl EditorView {
                 }
             });
         }
-    }
-
-    /// Seals the undo group even with no edit, as `capture` does, and parks the selection.
-    pub(crate) fn pin(&mut self, cx: &mut Context<Self>) {
-        if self.pinned.is_some() {
-            return;
-        }
-        let selection = self.input.state().selection();
-        // `update`, never `as_mut`: a lease notifies on drop, which schedules an autosave.
-        let pinned = self.input.buffer().update(cx, |buffer, _| {
-            buffer.finalize_transaction();
-            ParkedSelection::park(selection, buffer)
-        });
-        self.pinned = Some(pinned);
-    }
-
-    pub(crate) fn unpin(&mut self, cx: &mut Context<Self>) {
-        self.drop_pin(cx);
-    }
-
-    pub(crate) fn is_pinned(&self) -> bool {
-        self.pinned.is_some()
-    }
-
-    /// Forgets the anchors unread: every buffer version already reset the selection to them.
-    fn drop_pin(&mut self, cx: &mut App) -> bool {
-        let Some(pinned) = self.pinned.take() else {
-            return false;
-        };
-        let _ = self
-            .input
-            .buffer()
-            .update(cx, |buffer, _| pinned.unpark(buffer));
-        true
-    }
-
-    /// The selection as anchors in the bound buffer, unsealed: the pin it replaces already sealed.
-    fn park_selection(&self, cx: &mut App) -> ParkedSelection {
-        let selection = self.input.state().selection();
-        self.input
-            .buffer()
-            .update(cx, |buffer, _| ParkedSelection::park(selection, buffer))
     }
 
     /// Covers writes that bypass `edit_buffer`; tests make them today.
@@ -260,6 +201,7 @@ impl EditorView {
             code_block_wrap: theme::code_block_wrap(cx),
             theme: theme::current(cx),
             scrolls: &self.scrolls,
+            decorations: decorations::drawn(self.input.buffer(), cx),
         };
         let previous = self.input.last_layout();
         match previous.filter(|layout| layout.is_shaped_from(&inputs)) {
@@ -419,6 +361,11 @@ impl InputHost for EditorView {
         }
         self.reveal_cursor(Reveal::Minimal, cx);
     }
+
+    fn snap(&self) -> impl Fn(ByteOffset, Bias) -> ByteOffset + 'static {
+        let markdown = Rc::clone(&self.markdown);
+        move |offset, bias| markdown.snap(offset, bias)
+    }
 }
 
 impl Focusable for EditorView {
@@ -432,28 +379,13 @@ impl Render for EditorView {
         // A reload applied without a buffer notify would otherwise shape stale spans.
         self.refresh(cx);
         let colors = theme::current(cx).colors;
-        text_input::on_actions(div(), cx)
+        actions::on_actions(text_input::on_actions(div(), cx), cx)
             .id("editor")
             .key_context(TextInput::key_context(text_input::EDITOR_CONTEXT))
             .role(gpui::Role::MultilineTextInput)
             .aria_label("Document")
             .track_focus(self.input.focus_handle())
             .cursor(CursorStyle::IBeam)
-            .on_action(cx.listener(Self::copy))
-            .on_action(cx.listener(Self::cut))
-            .on_action(cx.listener(Self::paste))
-            .on_action(cx.listener(Self::up))
-            .on_action(cx.listener(Self::down))
-            .on_action(cx.listener(Self::select_up))
-            .on_action(cx.listener(Self::select_down))
-            .on_action(cx.listener(Self::doc_start))
-            .on_action(cx.listener(Self::doc_end))
-            .on_action(cx.listener(Self::newline))
-            .on_action(cx.listener(Self::undo))
-            .on_action(cx.listener(Self::redo))
-            .on_action(cx.listener(Self::follow_link))
-            .on_action(cx.listener(Self::follow_link_in_new_tab))
-            .on_action(cx.listener(Self::follow_link_in_split))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))

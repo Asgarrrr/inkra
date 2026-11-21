@@ -48,13 +48,17 @@ inkra-markdown inkra-text
 inkra-index inkra-vault
 inkra-index inkra-markdown
 inkra-index inkra-text
+inkra-highlight inkra-text
+inkra-highlight inkra-editor
+inkra-highlight inkra-markdown
 inkra-app inkra-text
 inkra-app inkra-editor
 inkra-app inkra-vault
 inkra-app inkra-markdown
 inkra-app inkra-index
 inkra-app inkra-tabs
-inkra-app inkra-layout"
+inkra-app inkra-layout
+inkra-app inkra-highlight"
 if ! command -v jq >/dev/null 2>&1; then
   echo "ERROR: jq is not installed — run: brew install jq" >&2
   exit 1

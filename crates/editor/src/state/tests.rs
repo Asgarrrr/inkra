@@ -13,25 +13,25 @@ fn editor(text: &str) -> (Buffer, EditorState) {
 #[test]
 fn backspace_deletes_a_grapheme_not_a_char() {
     let (mut buffer, mut state) = editor("xe\u{301}");
-    state.backspace(&mut buffer, Instant::now());
+    state.backspace(&mut buffer, Instant::now(), no_snap);
     assert_eq!(buffer.text(), "x");
 }
 
 #[test]
 fn arrows_step_over_a_zwj_emoji_as_one_unit() {
     let (buffer, mut state) = editor("👨\u{200d}👩\u{200d}👧");
-    state.move_(&buffer, LogicalMovement::DocStart, false);
-    state.move_(&buffer, LogicalMovement::Right, false);
+    state.move_(&buffer, LogicalMovement::DocStart, false, no_snap);
+    state.move_(&buffer, LogicalMovement::Right, false, no_snap);
     assert_eq!(state.cursor(), buffer.len());
-    state.move_(&buffer, LogicalMovement::Left, false);
+    state.move_(&buffer, LogicalMovement::Left, false, no_snap);
     assert_eq!(state.cursor(), at(0));
 }
 
 #[test]
 fn shift_arrows_extend_and_typing_replaces_the_selection() {
     let (mut buffer, mut state) = editor("abc");
-    state.move_(&buffer, LogicalMovement::Left, true);
-    state.move_(&buffer, LogicalMovement::Left, true);
+    state.move_(&buffer, LogicalMovement::Left, true, no_snap);
+    state.move_(&buffer, LogicalMovement::Left, true, no_snap);
     assert_eq!(state.selection().range(), at(1)..at(3));
     assert!(state.selection().reversed());
 
@@ -43,17 +43,17 @@ fn shift_arrows_extend_and_typing_replaces_the_selection() {
 #[test]
 fn a_reversed_selection_collapses_to_its_near_end() {
     let (buffer, mut state) = editor("abc");
-    state.move_(&buffer, LogicalMovement::Left, true);
-    state.move_(&buffer, LogicalMovement::Left, false);
+    state.move_(&buffer, LogicalMovement::Left, true, no_snap);
+    state.move_(&buffer, LogicalMovement::Left, false, no_snap);
     assert_eq!(state.cursor(), at(2));
 }
 
 #[test]
 fn a_forward_selection_collapses_to_its_far_end() {
     let (buffer, mut state) = editor("abc");
-    state.move_(&buffer, LogicalMovement::DocStart, false);
-    state.move_(&buffer, LogicalMovement::Right, true);
-    state.move_(&buffer, LogicalMovement::Right, false);
+    state.move_(&buffer, LogicalMovement::DocStart, false, no_snap);
+    state.move_(&buffer, LogicalMovement::Right, true, no_snap);
+    state.move_(&buffer, LogicalMovement::Right, false, no_snap);
     assert_eq!(state.cursor(), at(1));
 }
 
@@ -73,8 +73,8 @@ fn replacing_a_selection_is_a_single_undo_step() {
 #[test]
 fn undo_places_the_cursor_on_the_restored_text() {
     let (mut buffer, mut state) = editor("abc");
-    state.move_(&buffer, LogicalMovement::DocStart, false);
-    state.delete(&mut buffer, Instant::now());
+    state.move_(&buffer, LogicalMovement::DocStart, false, no_snap);
+    state.delete(&mut buffer, Instant::now(), no_snap);
     assert_eq!(buffer.text(), "bc");
 
     assert!(state.undo(&mut buffer));
@@ -110,7 +110,7 @@ fn a_typing_run_undoes_in_one_step() {
 #[test]
 fn deleting_at_the_end_of_the_buffer_does_nothing() {
     let (mut buffer, mut state) = editor("ab");
-    state.delete(&mut buffer, Instant::now());
+    state.delete(&mut buffer, Instant::now(), no_snap);
     assert_eq!(buffer.text(), "ab");
     assert!(!state.undo(&mut buffer));
 }
@@ -118,8 +118,8 @@ fn deleting_at_the_end_of_the_buffer_does_nothing() {
 #[test]
 fn backspace_at_the_start_of_the_buffer_does_nothing() {
     let (mut buffer, mut state) = editor("ab");
-    state.move_(&buffer, LogicalMovement::DocStart, false);
-    state.backspace(&mut buffer, Instant::now());
+    state.move_(&buffer, LogicalMovement::DocStart, false, no_snap);
+    state.backspace(&mut buffer, Instant::now(), no_snap);
     assert_eq!(buffer.text(), "ab");
     assert!(!state.undo(&mut buffer));
 }
@@ -144,78 +144,78 @@ fn undo_drops_the_composing_region() {
 #[test]
 fn moving_past_either_end_saturates() {
     let (buffer, mut state) = editor("ab");
-    state.move_(&buffer, LogicalMovement::DocStart, false);
-    state.move_(&buffer, LogicalMovement::Left, false);
+    state.move_(&buffer, LogicalMovement::DocStart, false, no_snap);
+    state.move_(&buffer, LogicalMovement::Left, false, no_snap);
     assert_eq!(state.cursor(), at(0));
 
-    state.move_(&buffer, LogicalMovement::DocEnd, false);
-    state.move_(&buffer, LogicalMovement::Right, false);
+    state.move_(&buffer, LogicalMovement::DocEnd, false, no_snap);
+    state.move_(&buffer, LogicalMovement::Right, false, no_snap);
     assert_eq!(state.cursor(), buffer.len());
 }
 
 #[test]
 fn home_and_end_go_to_the_line_ends_not_the_document_ends() {
     let (buffer, mut state) = editor("aaa\nbbb\nccc");
-    state.move_to(&buffer, at(5), false);
+    state.move_to(&buffer, at(5), false, no_snap);
 
-    state.move_(&buffer, LogicalMovement::LineStart, false);
+    state.move_(&buffer, LogicalMovement::LineStart, false, no_snap);
     assert_eq!(state.cursor(), at(4));
-    state.move_(&buffer, LogicalMovement::LineEnd, false);
+    state.move_(&buffer, LogicalMovement::LineEnd, false, no_snap);
     assert_eq!(state.cursor(), at(7));
 }
 
 #[test]
 fn the_document_ends_are_still_reachable() {
     let (buffer, mut state) = editor("aaa\nbbb");
-    state.move_(&buffer, LogicalMovement::DocStart, false);
+    state.move_(&buffer, LogicalMovement::DocStart, false, no_snap);
     assert_eq!(state.cursor(), at(0));
-    state.move_(&buffer, LogicalMovement::DocEnd, false);
+    state.move_(&buffer, LogicalMovement::DocEnd, false, no_snap);
     assert_eq!(state.cursor(), buffer.len());
 }
 
 #[test]
 fn home_on_an_already_home_cursor_stays_put() {
     let (buffer, mut state) = editor("aaa\nbbb");
-    state.move_to(&buffer, at(4), false);
-    state.move_(&buffer, LogicalMovement::LineStart, false);
+    state.move_to(&buffer, at(4), false, no_snap);
+    state.move_(&buffer, LogicalMovement::LineStart, false, no_snap);
     assert_eq!(state.cursor(), at(4));
-    state.move_(&buffer, LogicalMovement::LineStart, false);
+    state.move_(&buffer, LogicalMovement::LineStart, false, no_snap);
     assert_eq!(state.cursor(), at(4));
 }
 
 #[test]
 fn both_line_ends_of_an_empty_line_are_the_same_offset() {
     let (buffer, mut state) = editor("a\n\nb");
-    state.move_to(&buffer, at(2), false);
-    state.move_(&buffer, LogicalMovement::LineEnd, false);
+    state.move_to(&buffer, at(2), false, no_snap);
+    state.move_(&buffer, LogicalMovement::LineEnd, false, no_snap);
     assert_eq!(state.cursor(), at(2));
-    state.move_(&buffer, LogicalMovement::LineStart, false);
+    state.move_(&buffer, LogicalMovement::LineStart, false, no_snap);
     assert_eq!(state.cursor(), at(2));
 }
 
 #[test]
 fn end_then_right_crosses_to_the_next_line() {
     let (buffer, mut state) = editor("aa\nbb");
-    state.move_to(&buffer, at(0), false);
-    state.move_(&buffer, LogicalMovement::LineEnd, false);
+    state.move_to(&buffer, at(0), false, no_snap);
+    state.move_(&buffer, LogicalMovement::LineEnd, false, no_snap);
     assert_eq!(state.cursor(), at(2));
-    state.move_(&buffer, LogicalMovement::Right, false);
+    state.move_(&buffer, LogicalMovement::Right, false, no_snap);
     assert_eq!(state.cursor(), at(3));
 }
 
 #[test]
 fn home_from_a_selection_uses_the_line_the_caret_is_on() {
     let (buffer, mut state) = editor("aaa\nbbb");
-    state.move_to(&buffer, at(7), false);
-    state.move_(&buffer, LogicalMovement::Left, true);
-    state.move_(&buffer, LogicalMovement::LineStart, false);
+    state.move_to(&buffer, at(7), false, no_snap);
+    state.move_(&buffer, LogicalMovement::Left, true, no_snap);
+    state.move_(&buffer, LogicalMovement::LineStart, false, no_snap);
     assert_eq!(state.cursor(), at(4));
 }
 
 #[test]
 fn insert_splits_the_line_at_the_caret() {
     let (mut buffer, mut state) = editor("abcd");
-    state.move_to(&buffer, at(2), false);
+    state.move_to(&buffer, at(2), false, no_snap);
     state.insert(&mut buffer, Instant::now(), "\n");
     assert_eq!(buffer.text(), "ab\ncd");
     assert_eq!(state.cursor(), at(3));
@@ -250,30 +250,30 @@ fn span(text: &str) -> Copied {
 #[test]
 fn copy_takes_exactly_the_selection() {
     let (buffer, mut state) = editor("abc");
-    state.move_to(&buffer, at(0), false);
-    state.move_to(&buffer, at(2), true);
+    state.move_to(&buffer, at(0), false, no_snap);
+    state.move_to(&buffer, at(2), true, no_snap);
     assert_eq!(state.copy(&buffer), span("ab"));
 }
 
 #[test]
 fn copy_with_no_selection_takes_the_whole_line_and_its_newline() {
     let (buffer, mut state) = editor("x\ny\n");
-    state.move_to(&buffer, at(0), false);
+    state.move_to(&buffer, at(0), false, no_snap);
     assert_eq!(state.copy(&buffer), line("x\n"));
 }
 
 #[test]
 fn copy_on_an_unterminated_last_line_still_ends_in_a_newline() {
     let (buffer, mut state) = editor("x\ny");
-    state.move_to(&buffer, at(3), false);
+    state.move_to(&buffer, at(3), false, no_snap);
     assert_eq!(state.copy(&buffer), line("y\n"));
 }
 
 #[test]
 fn cut_removes_what_it_put_on_the_clipboard_in_one_undo_step() {
     let (mut buffer, mut state) = editor("abc");
-    state.move_to(&buffer, at(0), false);
-    state.move_to(&buffer, at(2), true);
+    state.move_to(&buffer, at(0), false, no_snap);
+    state.move_to(&buffer, at(2), true, no_snap);
 
     assert_eq!(state.cut(&mut buffer), span("ab"));
     assert_eq!(buffer.text(), "c");
@@ -285,7 +285,7 @@ fn cut_removes_what_it_put_on_the_clipboard_in_one_undo_step() {
 #[test]
 fn cut_with_no_selection_removes_the_newline_too() {
     let (mut buffer, mut state) = editor("x\ny");
-    state.move_to(&buffer, at(0), false);
+    state.move_to(&buffer, at(0), false, no_snap);
 
     assert_eq!(state.cut(&mut buffer), line("x\n"));
     assert_eq!(buffer.text(), "y");
@@ -294,7 +294,7 @@ fn cut_with_no_selection_removes_the_newline_too() {
 #[test]
 fn cut_on_an_empty_last_line_copies_a_newline_and_removes_nothing() {
     let (mut buffer, mut state) = editor("x\n");
-    state.move_to(&buffer, at(2), false);
+    state.move_to(&buffer, at(2), false, no_snap);
 
     assert_eq!(state.cut(&mut buffer), line("\n"));
     assert_eq!(buffer.text(), "x\n");
@@ -306,11 +306,11 @@ fn a_cut_that_removes_nothing_does_not_split_a_typing_run() {
     let (mut buffer, mut state) = editor("x\n");
     let start = Instant::now();
 
-    state.move_to(&buffer, at(0), false);
+    state.move_to(&buffer, at(0), false, no_snap);
     state.insert(&mut buffer, start, "a");
-    state.move_to(&buffer, buffer.len(), false);
+    state.move_to(&buffer, buffer.len(), false, no_snap);
     state.cut(&mut buffer);
-    state.move_to(&buffer, at(1), false);
+    state.move_to(&buffer, at(1), false, no_snap);
     state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL / 2, "b");
     assert_eq!(buffer.text(), "abx\n");
 
@@ -337,7 +337,7 @@ fn pasting_a_line_over_a_selection_replaces_it_like_any_other_text() {
 #[test]
 fn pasting_a_line_at_a_bare_caret_inserts_above_and_keeps_the_column() {
     let (mut buffer, mut state) = editor("abc\ndef");
-    state.move_to(&buffer, at(5), false);
+    state.move_to(&buffer, at(5), false, no_snap);
 
     state.paste(&mut buffer, &line("XY\n"));
     assert_eq!(buffer.text(), "abc\nXY\ndef");
@@ -366,7 +366,7 @@ fn a_cut_merges_with_the_typing_on_neither_side() {
     let start = Instant::now();
 
     state.insert(&mut buffer, start, "a");
-    state.move_(&buffer, LogicalMovement::Left, true);
+    state.move_(&buffer, LogicalMovement::Left, true, no_snap);
     state.cut(&mut buffer);
     state.insert(&mut buffer, start + inkra_text::GROUP_INTERVAL, "b");
     assert_eq!(buffer.text(), "xyb");
@@ -403,7 +403,7 @@ fn a_paste_of_nothing_keeps_the_selection_text() {
 fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
     // Pinned: the stated price of synthesizing the newline in `cut` as well as in `copy`.
     let (mut buffer, mut state) = editor("a");
-    state.move_to(&buffer, at(0), false);
+    state.move_to(&buffer, at(0), false, no_snap);
 
     let copied = state.cut(&mut buffer);
     assert_eq!(buffer.text(), "");
@@ -414,14 +414,14 @@ fn cutting_an_unterminated_last_line_and_pasting_it_back_adds_the_terminator() {
 #[test]
 fn move_to_snaps_an_offset_off_a_char_boundary() {
     let (buffer, mut state) = editor("héllo");
-    state.move_to(&buffer, at(2), false);
+    state.move_to(&buffer, at(2), false, no_snap);
     assert_eq!(state.cursor(), at(1));
 }
 
 #[test]
 fn move_vertically_moves_the_cursor_and_carries_the_goal() {
     let (buffer, mut state) = editor("ab");
-    state.move_vertically(&buffer, at(1), false, Goal::Column(12.0));
+    state.move_vertically(&buffer, at(1), false, Goal::Column(12.0), no_snap);
     assert_eq!(state.cursor(), at(1));
     assert_eq!(state.selection().goal(), Goal::Column(12.0));
 }
@@ -429,7 +429,7 @@ fn move_vertically_moves_the_cursor_and_carries_the_goal() {
 #[test]
 fn move_to_clamps_an_offset_past_the_end() {
     let (buffer, mut state) = editor("ab");
-    state.move_to(&buffer, at(99), false);
+    state.move_to(&buffer, at(99), false, no_snap);
     assert_eq!(state.cursor(), buffer.len());
 }
 
@@ -448,7 +448,7 @@ fn an_explicit_range_outranks_the_composing_region_and_the_selection() {
 #[test]
 fn the_composing_region_outranks_the_selection() {
     let (buffer, mut state) = editor("hello");
-    state.move_to(&buffer, at(4), false);
+    state.move_to(&buffer, at(4), false, no_snap);
     state.set_marked_range(Some(at(1)..at(3)));
 
     assert_eq!(state.target_range(&buffer, None), at(1)..at(3));
@@ -457,8 +457,8 @@ fn the_composing_region_outranks_the_selection() {
 #[test]
 fn the_selection_is_the_fallback() {
     let (buffer, mut state) = editor("hello");
-    state.move_to(&buffer, at(1), false);
-    state.move_to(&buffer, at(4), true);
+    state.move_to(&buffer, at(1), false, no_snap);
+    state.move_to(&buffer, at(4), true, no_snap);
 
     assert_eq!(state.target_range(&buffer, None), at(1)..at(4));
 }
@@ -504,7 +504,7 @@ fn composing_with_empty_text_ends_the_composition() {
 #[test]
 fn the_composing_caret_is_rebased_before_it_is_converted() {
     let (mut buffer, mut state) = editor("😀");
-    state.move_to(&buffer, buffer.len(), false);
+    state.move_to(&buffer, buffer.len(), false, no_snap);
 
     state.mark_and_replace_in_range(&mut buffer, Instant::now(), None, "ab", Some(0..1));
 

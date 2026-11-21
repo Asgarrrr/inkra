@@ -17,7 +17,8 @@ uncertainty, for reasons given below.
 | ~~Horizontal scroll and reveal~~ | **Closed 2026-09-23, by removal.** Soft wrap leaves no right edge to lose the caret past. | — | — |
 | ~~Soft wrap~~ | **Shipped 2026-09-23.** Its trigger was the one above: a pasted URL. | — | — |
 | ~~One shape per keystroke~~ | **Shipped 2026-09-28.** A frame reuses the layout its inputs already produced, a reload included; see Measurements below. | — | — |
-| Virtualization | A profile on a real note showing per-frame shaping or `SharedString` allocation costs anything. Measured 2026-09-28: it costs above ~290 KB. | 2–3 d | — |
+| Virtualization | After incremental layout ships, a profile on a real note shows a full rebuild above 16 ms on a common gesture: open, theme switch, resize below the column cap, typing a fence. A keystroke and a caret move rebuild only their dirty lines (`superpowers/specs/2026-11-15-incremental-draw-runs-design.md`, "Alternative considered"). The synthetic 500 KB open already measures 28–157 ms, so the trigger turns on real notes and real gestures. | 2–3 d | — |
+| Incremental parse | After incremental layout, `parse` is the keystroke's floor: 1.4–2 ms at 500 KB, the whole note on every edit. A profile on a real note shows it costing a frame (`superpowers/specs/2026-11-15-incremental-draw-runs-design.md`, open question 4). | unsized | — |
 | Multi-cursor | No trigger identified yet. | 4–6 d | — |
 | ~~Reveal in prepaint~~ | **Shipped 2026-09-29 (tabs S0)**: a waiting scroll resolves in `TextElement::prepaint`, the element shifts its own paint by the offset it wrote; the flash and the deferred notify are gone (`superpowers/specs/2026-09-29-tabs-design.md`, As built (S0)). | — | — |
 | `TextElement` owns its vertical scroll: an anchor (`TopLine`, as Zed's `ScrollAnchor` in its `ScrollManager`) becomes the source of truth instead of the `div`'s pixel offset, which removes `text_top`, the prepaint shift and the only-child invariant (`superpowers/specs/2026-09-29-tabs-design.md`, As built (S0)) | A resize shifting the text under the viewport is reported, or virtualization needs the visible rows before layout | 1–2 d | — |
@@ -80,9 +81,9 @@ longer grows with the note (`superpowers/specs/2026-11-02-perf-batch-design.md`)
 Soft wrap has shipped, so rows are no longer one `line_height` per line and
 `uniform_list` is out. It is a custom windowed element that shapes visible rows
 only — the same conclusion markdown live preview reaches independently, per the
-modular architecture design doc. One whole-document pass is left:
-`edit_buffer` shapes before revealing the caret, and the frame reuses that
-layout. The windowed element must shape only visible rows there as well.
+modular architecture design doc. Since incremental layout, a keystroke or a
+caret move shapes only its dirty lines. The whole-document work left is the
+parse, the O(lines) placement pass, and the full rebuilds in the row above.
 
 ### Multi-cursor
 

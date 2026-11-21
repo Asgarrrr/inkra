@@ -471,3 +471,39 @@ build.
   from the spec's "Out of scope": one `NoteTable` in vault order, indexed by a
   `hashbrown::HashTable<u32>`, estimated at 11 to 20 MiB.
 - The longest turn is read from the launch lines of `scripts/launch-figure.sh`, 5 runs per build.
+
+## Feature registry and switches (2026-11-13)
+
+The feature registry (#41, #42) and vault search on it (branch `vault-search-feature`) were meant
+to cost nothing on the launch path. Two warm runs check it, on the 50,000-note `startup_vault`
+vault, release builds, one primed `HOME` per build or configuration, 7 runs each, alternated.
+Apple M5 Pro, 48 GB, macOS 26.5.
+
+The A/B compares `f0e65ef7`, main before the registry, with `c58a2ea6`.
+
+| Median of 7 | before | after |
+|---|---:|---:|
+| first frame | 84.5 ms | 85.1 ms |
+| cache decoded | 110.5 ms | 112.1 ms |
+| indexed | 228.1 ms | 228.1 ms |
+| longest turn | 1.7 ms | 1.8 ms |
+| rss | 161,760 kB | 161,664 kB |
+
+The switches run launches `c58a2ea6` four times over, each with its own `.inkra/settings.json`:
+every feature on, `backlinks` off, `vault_search` off, and every feature off.
+
+| Median of 7 | on | backlinks off | vault search off | all off |
+|---|---:|---:|---:|---:|
+| first frame | 82.8 ms | 80.7 ms | 85.8 ms | 82.9 ms |
+| cache decoded | 104.6 ms | 102.5 ms | 111.1 ms | 101.8 ms |
+| indexed | 226.4 ms | 221.2 ms | 232.6 ms | 223.0 ms |
+| longest turn | 1.9 ms | 1.8 ms | 1.7 ms | 1.7 ms |
+| rss | 162,944 kB | 162,448 kB | 162,736 kB | 162,864 kB |
+
+- No difference stands above the noise: `first frame` spans 74.5 to 88.3 ms and `indexed` 203.6
+  to 238.2 ms within single configurations. `phys_footprint` is bimodal as above and not compared.
+- The launch line's `registry` and `activated backlinks` marks fall within 0.1 ms of each other:
+  activating backlinks costs under 0.1 ms. Quick open and vault search activate on their first
+  command, so they cost nothing at launch.
+- Not measured: the cold launch, the first `⌘⇧F`, and the backlinks rebuild while typing, where
+  switching backlinks off would most likely show.

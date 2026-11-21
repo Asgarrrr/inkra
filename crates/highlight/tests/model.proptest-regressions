@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3bee32f66bd5ca1b4aaac04680990f0918d6abb1f29b151b7fb01f510812fa3c # shrinks to steps = [Edit([Delete(Index(3035540164028154064), 1)])]
+cc 6b864b0a98df5ae18d12d3530dff8f13bd4e3786d5f2962d22a196aae0a7109b # shrinks to a list item merge that turns an empty chunk into a fenced block
+cc 24b14023f6503cc3d6f9e1c8d602a2e8479c72d261c043db917378f784a739c2 # shrinks to steps = [Edit([Replace(Index(11597320113851152704), 4, "<!--")]), Edit([Delete(Index(2802037074487526828), 1)])]
+cc f915409d58801b33de996f10d51d85728efe3c1873552822b03f44629d3673e9 # shrinks to steps = [Edit([Insert(Index(0), "`")]), Redo, Edit([Insert(Index(0), "```\n"), Delete(Index(15500389117492053789), 1)])]
+cc 7b176f1a4ac0e9dc8d227a65464eb1acb127d0d8f82773c3b9735fd4234e1692 # shrinks to steps = [Edit([Delete(Index(14600029669713247014), 1)])]

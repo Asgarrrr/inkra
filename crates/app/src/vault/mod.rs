@@ -4,6 +4,7 @@
 use gpui::actions;
 
 mod events;
+mod moves;
 mod reload;
 mod save;
 mod scans;
@@ -23,5 +24,6 @@ pub(crate) use events::{
 };
 #[cfg(any(test, feature = "shot"))]
 pub(crate) use store::AUTOSAVE_DELAY;
+pub(crate) use store::BytesRead;
 pub(crate) use store::NoteStore;
 pub(crate) use tree_ops::Created;

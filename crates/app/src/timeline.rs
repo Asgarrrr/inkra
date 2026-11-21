@@ -31,6 +31,10 @@ pub(crate) enum Step {
         words_bytes: usize,
         names_bytes: usize,
     },
+    /// The shell's launch task ran: the registry activates its `after_first_frame` features.
+    Registry,
+    /// A feature activated, by id.
+    Activated(&'static str),
 }
 
 struct Indexed {
@@ -54,6 +58,9 @@ pub(crate) struct Timeline {
     seed_turn: Option<Duration>,
     indexed: Option<Indexed>,
     longest_turn: Duration,
+    registry: Option<Duration>,
+    /// The first activation of each feature, in order.
+    activated: Vec<(&'static str, Duration)>,
 }
 
 impl Global for Timeline {}
@@ -71,6 +78,8 @@ impl Timeline {
             seed_turn: None,
             indexed: None,
             longest_turn: Duration::ZERO,
+            registry: None,
+            activated: Vec::new(),
         }
     }
 
@@ -156,6 +165,12 @@ impl Timeline {
                     names_bytes,
                 });
             }
+            Step::Registry => _ = self.registry.get_or_insert(at),
+            Step::Activated(id) => {
+                if !self.activated.iter().any(|&(seen, _)| seen == id) {
+                    self.activated.push((id, at));
+                }
+            }
         }
         !was_complete && self.is_complete()
     }
@@ -189,15 +204,26 @@ impl Timeline {
         let cache = self
             .cache
             .map_or_else(|| "-".to_owned(), |(name, at)| format!("{name} {at:.1?}"));
+        let activated = if self.activated.is_empty() {
+            "-".to_owned()
+        } else {
+            let each: Vec<_> = self
+                .activated
+                .iter()
+                .map(|(id, at)| format!("{id} {at:.1?}"))
+                .collect();
+            each.join("; ")
+        };
         format!(
             "launch: first frame {}, session read {}, root {}, scanned {}, names ready {}, \
-             cache {cache}, seed turn {}, indexed {indexed}",
+             cache {cache}, seed turn {}, indexed {indexed}, registry {}, activated {activated}",
             at(self.first_frame),
             span(self.session_read),
             at(self.root),
             at(self.scanned),
             at(self.names_ready),
-            span(self.seed_turn)
+            span(self.seed_turn),
+            at(self.registry)
         )
     }
 }
