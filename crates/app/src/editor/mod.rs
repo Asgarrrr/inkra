@@ -2,7 +2,6 @@ pub(crate) mod actions;
 mod block_scroll;
 mod element;
 pub(crate) mod layout;
-mod lists;
 mod motion;
 mod mouse;
 mod parked;

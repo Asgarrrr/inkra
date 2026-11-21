@@ -8,6 +8,8 @@ use super::{EditorView, LinkFollowed};
 use crate::open::Open;
 use crate::text_input::InputHost;
 
+mod lists;
+
 actions!(
     editor,
     [

@@ -6,14 +6,19 @@ use std::time::Instant;
 use gpui::{Context, Window};
 use inkra_text::Diff;
 
-use super::EditorView;
-use super::actions::Newline;
+use super::Newline;
+use crate::editor::EditorView;
 use crate::text_input::InputHost;
 
 impl EditorView {
     /// A selection, marked text or no list rule takes the plain `\n`; a stale parse edits nothing,
     /// since its offsets may not fit the text.
-    pub(super) fn newline(&mut self, _: &Newline, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::editor) fn newline(
+        &mut self,
+        _: &Newline,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let state = self.input.state();
         let buffer = self.input.buffer().read(cx);
         let edit = if state.selection().is_empty() && state.marked_range().is_none() {

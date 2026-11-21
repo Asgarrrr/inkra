@@ -10,7 +10,6 @@ mod failures;
 mod gone;
 mod headings;
 mod hover;
-mod list_editing;
 mod markdown_blocks;
 mod quick_open;
 mod reload;
@@ -450,7 +449,6 @@ pub(crate) fn catalogue() -> impl Iterator<Item = &'static Scene> {
         .chain(&markdown_blocks::SCENES)
         .chain(&code_blocks::SCENES)
         .chain(&code_highlighting::SCENES)
-        .chain(&list_editing::SCENES)
 }
 
 fn empty_no_vault(stage: &mut Stage) -> WindowHandle<AppShell> {
