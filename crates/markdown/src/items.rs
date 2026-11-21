@@ -7,9 +7,9 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Tag, TagEnd};
 
 use crate::Conceal;
-use crate::structure::Item;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
 use crate::spans::{line_end, line_start, to_offsets};
+use crate::structure::Item;
 use walk::{Held, Walk};
 
 /// A gutter item as the parse met it.
@@ -187,7 +187,8 @@ impl Items {
         while let Some(first) = rest.first() {
             let marker = items[first.marker].marker.get();
             let line = line_start(text, marker);
-            let on_line = |item: &&Record| line_start(text, items[item.marker].marker.get()) == line;
+            let on_line =
+                |item: &&Record| line_start(text, items[item.marker].marker.get()) == line;
             // `first` opens on the line, so `opening` holds at least it.
             let count = 1 + rest[1..].iter().take_while(on_line).count();
             let (opening, after) = rest.split_at(count);
@@ -288,6 +289,48 @@ pub(crate) fn marker_end(text: &str, marker: usize) -> usize {
         .iter()
         .take_while(|byte| byte.is_ascii_digit());
     marker + 1 + digits.count()
+}
+
+/// The blanks after an item's marker, as `CommonMark` 5.2 counts them for its content start.
+pub(crate) struct MarkerBlanks {
+    /// The marker's end.
+    pub(crate) end: usize,
+    /// Their bytes, at most five.
+    pub(crate) len: usize,
+    /// Their columns.
+    pub(crate) columns: usize,
+    /// The marker end's column, counted from the line's start.
+    pub(crate) after: usize,
+}
+
+impl MarkerBlanks {
+    /// The blanks after the marker at `marker`, on the line starting at `line`.
+    pub(crate) fn at(text: &str, line: usize, marker: usize) -> Self {
+        let bytes = text.as_bytes();
+        let end = marker_end(text, marker);
+        let len = bytes[end..]
+            .iter()
+            .take(5)
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        let after = column_after(0, &bytes[line..end]);
+        Self {
+            end,
+            len,
+            columns: column_after(after, &bytes[end..end + len]) - after,
+            after,
+        }
+    }
+
+    /// The content start's column: past one to four columns of blanks, else past one.
+    pub(crate) fn content_column(&self) -> usize {
+        self.after
+            + if (1..=4).contains(&self.columns) {
+                self.columns
+            } else {
+                1
+            }
+    }
 }
 
 /// The column after `bytes` from `column`, a tab stopping at the next multiple of 4 (`CommonMark` 2.2).

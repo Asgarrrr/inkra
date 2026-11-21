@@ -1,0 +1,19 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 264c9de3bf611cc6f107ae6f8257904b04b11c1134dc60cb63444480d5cb7317 # shrinks to (text, caret) = ("> > - a", 7)
+cc 8a4087ed88aa7b0f541df4f14966c15ddae27165d2c75f6d315ffa1ca5093e78 # shrinks to (text, caret) = ("- a\n- a\n  - \n  ```\n  x\n  ```", 7)
+cc 3565ac97147962d08278e30f3f1d75bc0dd7ec4c3c7ab30a27de331ff8894cd4 # shrinks to (text, caret) = ("> - \n>   1. a", 12)
+cc bee98f13a1e53e44b0e893f1a2b8b5bf40a1eb9be0dd092ec45b98a3061b12c9 # shrinks to (text, caret) = ("> - [ ] b c", 8)
+cc 51bcb433f2e23c37d8842ee61a1cc3e05c12033614d294aabec9718e978cd883 # shrinks to (text, caret) = ("> - a\n> - a\nz\n>   ```\n>   x\n>   ```", 12)
+cc 5d702d8aaf25083d0323fb96180d6a18855e49aa0e58afbb8981a7abc4824037 # shrinks to (text, caret) = ("1. a\n   a\n   9. a\nz\n   ```\n   x\n   ```\n1. a", 17)
+cc a1848afd87e7976e83495e333f8d1d2569ccbe5e88882005a672741333d82401 # shrinks to (text, caret) = ("> 1. a\n>    10. [ ] \n> - a\n> - a\n> - a\n> - a", 12)
+cc 5f4e177e4e7953aa08ad66afef3dca1900b0cc4d4eae8c67b14b890b31a6e685 # shrinks to (text, caret) = ("- \n  ```\n  x\n  ```\n  ```\n  x\n  ```", 5)
+cc 9e090918c7dfccac0b05933ffde697880a44d78682e8f454e1fa442a36901d81 # shrinks to (text, caret) = ("> - a\n> - a\n> 1. a\n> 1. a\n>    ```\n>    x\n>    ```\n>    - a", 32)
+cc d765d66d60b2165f5da51b23bb4a3d050fd0e6b02bf1f4f25366f60ac71380cc # shrinks to (text, caret) = ("> 1. \n>\n> 1. a\n> - a", 7)
+cc 21b688f295852015783ce3599dde302d47bb6af6ee5d12ba17c925eb3484ce3a # shrinks to (text, caret) = ("- b c\n  - a", 3)
+cc 67a1211be4fab21318778156fc2b5fee00b489d7c790cd8aa8bb665b54111213 # shrinks to (text, caret) = ("- a\n- \n\n  - a", 6)
+cc 4a6f588d72825aff612bd6cb0a07acd0ece84f56b37955120ff9352c35d62e3a # shrinks to (text, caret) = ("> 10. \n>\n>     ```\n>     x\n>     ```\n> 9. a\n> - a\n> - a", 22)

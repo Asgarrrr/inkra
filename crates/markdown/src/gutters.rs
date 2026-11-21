@@ -107,16 +107,17 @@ impl Markdown {
     /// The task whose gutter starts at the line start `line_start` (D1).
     #[must_use]
     pub fn task_at(&self, line_start: ByteOffset) -> Option<&Task> {
+        self.gutter_on(line_start)?.item.as_ref()?.task.as_ref()
+    }
+
+    /// The gutter of the line starting at `line_start`.
+    pub(crate) fn gutter_on(&self, line_start: ByteOffset) -> Option<&Gutter> {
         let at = self
             .gutters
             .partition_point(|gutter| gutter.range.start < line_start);
         self.gutters
             .get(at)
-            .filter(|gutter| gutter.range.start == line_start)?
-            .item
-            .as_ref()?
-            .task
-            .as_ref()
+            .filter(|gutter| gutter.range.start == line_start)
     }
 
     /// `offset`, or an atom's edge when it lies inside one: its start, the end of the line before,
