@@ -113,9 +113,8 @@ impl Collector {
     }
 }
 
-/// A line where no item opens, read alone by one pulldown-cmark pass from `from`. The pass starts
-/// its tab stops at its text, so the text follows `c mod 4` spaces, `c` the columns before it:
-/// every tab stops where it does in the line, and the pad opens no code (task boxes spec, D6).
+/// A line where no item opens, read alone from `from` by one pass. Its text follows its columns
+/// before `from` mod 4 in spaces, so its tabs stop as in the line and the pad opens no code (D6).
 pub(crate) struct Fallback {
     /// The pad, the line's text from `from`, and a newline.
     pub(crate) piece: String,

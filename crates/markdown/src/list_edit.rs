@@ -123,9 +123,8 @@ impl<'m> Line<'m> {
         start + text[start..caret].trim_end_matches([' ', '\t']).len()
     }
 
-    /// Whether it continues the paragraph above only by laziness: no item opens on it, and it shows
-    /// fewer `>` than it is in, or starts left of its holder's content column. A blank line above
-    /// it would end that paragraph, and the line with it.
+    /// Whether it continues the paragraph above only by laziness: no item opens on it, and it
+    /// shows fewer `>` than it is in, or starts left of its holder's content column.
     fn is_lazy(&self, text: &str, markdown: &Markdown) -> bool {
         let gutter = self.gutter;
         let marked = gutter
@@ -139,8 +138,8 @@ impl<'m> Line<'m> {
                     .is_some_and(|at| column < content_column(text, markdown, at)))
     }
 
-    /// Its container prefix to `column` in place of its leading blanks, when it is lazy: a blank
-    /// line above it would end its paragraph (D2, rules 2, 6 and 8).
+    /// Its container prefix to `column` in place of its leading blanks, when it is lazy, which a
+    /// blank line above would end (D2, rules 2, 6 and 8).
     fn lazy_prefix(&self, text: &str, markdown: &Markdown, column: usize) -> Option<Hunk> {
         self.is_lazy(text, markdown).then(|| {
             let prefix = container_prefix(text, markdown, self.range.start, column);
@@ -187,9 +186,8 @@ fn content_column(text: &str, markdown: &Markdown, at: usize) -> usize {
     MarkerBlanks::at(text, line_start(text, marker), marker).content_column()
 }
 
-/// What follows a `\n` that starts a line in the quotes of the line starting at `line`, up to
-/// `column`: one `>` per quote, each with the indent before it and one space after it, copied from
-/// the nearest line at or above that shows them all, then spaces to `column` (D2).
+/// What follows a `\n` that starts a line in the quotes of the line at `line`: its `>`s, then
+/// spaces to `column` (D2).
 fn container_prefix(text: &str, markdown: &Markdown, line: usize, column: usize) -> String {
     let mut prefix = String::new();
     let at = markdown

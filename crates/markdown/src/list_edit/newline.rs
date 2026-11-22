@@ -13,9 +13,8 @@ use crate::items::{MarkerBlanks, marker_end};
 use crate::spans::{first_from, last_before};
 use crate::structure::Fallback;
 
-/// The edit `↩` makes at `caret` in `text`, as `markdown`, its parse, reads it; `None` where no
-/// list rule applies and the plain `\n` goes in. The caller gives a selection and marked text the
-/// plain key (D2, rule 1).
+/// The edit `↩` makes at `caret`, or `None` for the plain `\n` (D2). A selection and marked text
+/// take the plain key from the caller (rule 1).
 #[must_use]
 pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Option<ListEdit> {
     let caret = caret.get();
@@ -130,8 +129,7 @@ fn on_marker_line(
     }
 }
 
-/// `↩` past an item's text, or on an empty marker line that holds lines: the next sibling in
-/// place of `cut` and the blanks after it (D2, rule 6, D7).
+/// The next sibling, in place of `cut` and the blanks after it (D2, rule 6, D7).
 fn continued(
     text: &str,
     markdown: &Markdown,
@@ -224,9 +222,8 @@ fn has_previous_sibling(markdown: &Markdown, at: usize) -> bool {
     false
 }
 
-/// A sibling's marker line for item `at`, its number `step` past the item's, and its marker's
-/// offset in it: the container prefix to its marker's column, its marker, the blanks after it or one
-/// space past four columns, and an unchecked box for a task (D2, rule 6).
+/// The marker line of a sibling of item `at`, numbered `step` past it, and its marker's offset in
+/// it (D2, rule 6).
 fn continuation(
     text: &str,
     markdown: &Markdown,
@@ -242,7 +239,7 @@ fn continuation(
     match digits.parse::<u64>() {
         Ok(number) => {
             let number = (number + step).to_string();
-            out.extend(std::iter::repeat_n(
+            out.extend(iter::repeat_n(
                 '0',
                 digits.len().saturating_sub(number.len()),
             ));
@@ -266,10 +263,8 @@ fn continuation(
     (out, offset)
 }
 
-/// The blanks before `caret`, back to the text start, replaced by `\n` and the container prefix
-/// to `column`; a line left with no text keeps the quote part alone, trimmed, as the container
-/// prefix writes it, so a lazy line keeps its quote too. A blank new line gives a lazy line below
-/// its prefix (D2, rules 2 and 8).
+/// `\n` and the container prefix to `column`, in place of the blanks before `caret` (D2, rules 2
+/// and 8).
 fn split(
     text: &str,
     markdown: &Markdown,
@@ -279,6 +274,7 @@ fn split(
 ) -> ListEdit {
     let typed_end = line.typed_end(text, caret);
     let prefix = container_prefix(text, markdown, line.range.start, column);
+    // A line left with no text keeps its quote part as the prefix writes it, so a lazy one too.
     let (start, left) = if typed_end == line.text_start() {
         let quote = container_prefix(text, markdown, line.range.start, 0);
         (line.range.start, quote.trim_end().to_owned())
