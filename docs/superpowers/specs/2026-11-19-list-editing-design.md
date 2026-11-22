@@ -230,7 +230,7 @@ and the caret's offset in the edited text.
 **The invariant.** Every `\n` a command inserts is followed by the **container prefix** of the
 line it starts: the bytes that keep that line inside every container that holds it. Rules 2, 3, 6,
 7 and 8, the lazy-line indent and D5's moved lines all take their inserted text from one function,
-`Doc::container_prefix(line, column)`. No rule writes a quote marker or an indent of its
+`Line::container_prefix(column)`. No rule writes a quote marker or an indent of its
 own.
 
 - **The quote part.** One `>` per leading quote that holds the new line, outermost first, each
