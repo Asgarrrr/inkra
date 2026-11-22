@@ -5,10 +5,10 @@ use std::vec;
 
 use inkra_text::{ByteOffset, Hunk};
 
-use crate::items::{column_after, marker_end};
+use crate::items::{Content, Marker};
 use crate::parse::line_start_prefix;
-use crate::spans::{line_ranges, line_start};
-use crate::structure::{Structure, innermost_item};
+use crate::spans::{last_before, line_ranges, line_start};
+use crate::structure::{Fallback, Structure};
 use crate::{Markdown, parse};
 
 /// Parses of a spliced copy per `⌘L`: the first candidates, the second ones, then the batch
@@ -118,11 +118,11 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let items = &markdown.structure.items;
-    let innermost = items[..items.partition_point(|marker| (..line.end).contains(&marker.get()))]
-        .last()
-        .filter(|marker| marker.get() >= line.start);
+    let innermost = last_before(items, line.end, |item| item.marker.get())
+        .map(|at| items[at].marker.get())
+        .filter(|&marker| marker >= line.start);
     let splices: Vec<(usize, &str)> = if let Some(marker) = innermost {
-        vec![checkbox_at(text, line.start, marker.get())]
+        vec![checkbox_at(text, line.start, marker)]
     } else {
         let lead = line_start_prefix(text, &line);
         fallback(text, &line, lead)
@@ -146,33 +146,20 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
 /// what goes before it: the content start (D6). Its blanks count in columns from the line's start;
 /// one to four go before it, of five or more only one, and an empty item gains a space of its own.
 fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) {
-    let bytes = text.as_bytes();
-    let end = marker_end(text, marker);
-    let blanks = bytes[end..]
-        .iter()
-        .take(5)
-        .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
-        .count();
-    let after = column_after(0, &bytes[line..end]);
-    match column_after(after, &bytes[end..end + blanks]) - after {
-        0 => (end, " "),
-        1..=4 => (end + blanks, ""),
-        _ => (end + 1, ""),
+    let marker = Marker::at(text, line, marker);
+    match marker.content {
+        Content::Empty => (marker.end, " "),
+        Content::Blanks(blanks) => (blanks.end, ""),
+        Content::Indented => (marker.end + 1, ""),
     }
 }
 
 /// Where the innermost item pulldown-cmark reads on `line` alone, past its prefix of `lead` bytes,
-/// puts a checkbox. The pass starts its tab stops at its text, so the text follows `c mod 4` spaces,
-/// `c` the prefix's columns: every tab stops where it does in the line, and the pad opens no code
-/// (D6).
+/// puts a checkbox (D6).
 fn fallback(text: &str, line: &Range<usize>, lead: usize) -> Option<(usize, &'static str)> {
-    #[cfg(test)]
-    counted(&FALLBACKS);
-    let from = line.start + lead;
-    let pad = column_after(0, &text.as_bytes()[line.start..from]) % 4;
-    let piece = format!("{:pad$}{}\n", "", &text[from..line.end]);
-    let (at, before) = checkbox_at(&piece, 0, innermost_item(&piece)?);
-    Some((from + at - pad, before))
+    let fallback = Fallback::read(text, line, line.start + lead)?;
+    let (at, before) = checkbox_at(&fallback.piece, 0, fallback.marker);
+    Some((fallback.in_text(at), before))
 }
 
 /// Whether each line's current splice, applied with all the others to one copy, leaves the line
@@ -194,7 +181,7 @@ fn landed(text: &str, before: &Structure, cycled: &[Cycled], checked: bool) -> V
     }
     spliced.push_str(&text[copied..]);
     #[cfg(test)]
-    counted(&PARSES);
+    PARSES.set(PARSES.get() + 1);
     let parsed = parse(&spliced);
     // A splice lies inside its line, so a line moves by the growth of the splices before it.
     let mut shift = 0;
@@ -211,8 +198,13 @@ fn landed(text: &str, before: &Structure, cycled: &[Cycled], checked: bool) -> V
         })
         .collect();
     let after = &parsed.structure;
-    let items = moved(before.items.iter().map(|item| item.get()), &hunks)
-        .filter(|&(_, to)| after.items.binary_search(&ByteOffset::new(to)).is_err());
+    let items =
+        moved(before.items.iter().map(|item| item.marker.get()), &hunks).filter(|&(_, to)| {
+            after
+                .items
+                .binary_search_by_key(&ByteOffset::new(to), |item| item.marker)
+                .is_err()
+        });
     let quotes = before.quotes.iter().map(|quote| quote.get());
     let quotes = moved(quotes, &hunks)
         .filter(|&(_, to)| after.quotes.binary_search(&ByteOffset::new(to)).is_err());
@@ -240,14 +232,8 @@ fn moved<'a>(
 }
 
 #[cfg(test)]
-fn counted(passes: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
-    passes.set(passes.get() + 1);
-}
-
-#[cfg(test)]
 thread_local! {
     static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

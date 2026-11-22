@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use inkra_text::{Bias, ByteOffset, Hunk};
 
-use crate::spans::{line_ranges, line_start, push, to_offsets};
+use crate::spans::{first_from, line_ranges, line_start, push, to_offsets};
 use crate::{Conceal, Markdown, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,16 +107,13 @@ impl Markdown {
     /// The task whose gutter starts at the line start `line_start` (D1).
     #[must_use]
     pub fn task_at(&self, line_start: ByteOffset) -> Option<&Task> {
-        let at = self
-            .gutters
-            .partition_point(|gutter| gutter.range.start < line_start);
-        self.gutters
-            .get(at)
-            .filter(|gutter| gutter.range.start == line_start)?
-            .item
-            .as_ref()?
-            .task
-            .as_ref()
+        self.gutter_on(line_start)?.item.as_ref()?.task.as_ref()
+    }
+
+    /// The gutter of the line starting at `line_start`.
+    pub(crate) fn gutter_on(&self, line_start: ByteOffset) -> Option<&Gutter> {
+        first_from(&self.gutters, line_start, |gutter| gutter.range.start)
+            .filter(|gutter| gutter.range.start == line_start)
     }
 
     /// `offset`, or an atom's edge when it lies inside one: its start, the end of the line before,

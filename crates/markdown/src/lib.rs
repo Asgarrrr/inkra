@@ -7,12 +7,15 @@ mod front_matter;
 mod gutters;
 mod items;
 mod links;
+mod list_edit;
 mod markup;
 mod parse;
 mod reveal;
 mod spans;
 mod structure;
 mod styles;
+#[cfg(test)]
+mod testing;
 
 pub use changed::changed;
 pub use content_lines::content_lines;
@@ -21,9 +24,10 @@ pub use display::{DisplayLine, DisplayOffset};
 pub use front_matter::front_matter;
 pub use gutters::{Gutter, ItemMarker, ItemPart, Task, WidthKey};
 pub use links::{Link, LinkKind, link_at, links};
+pub use list_edit::{ListEdit, continue_list};
 pub use markup::markup;
 pub use parse::{CodeBlock, Heading, Markdown, Span, parse};
 pub use pulldown_cmark::HeadingLevel;
 pub use reveal::{Conceal, is_active, touched};
-pub use structure::Structure;
+pub use structure::{Item, Structure};
 pub use styles::{HEADING_LEVELS, Styles};

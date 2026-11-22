@@ -36,8 +36,14 @@ fn offsets(markdown: &Markdown) -> Vec<usize> {
         }
     }
     let structure = &markdown.structure;
-    let openers = structure.items.iter().chain(&structure.quotes);
-    openers.for_each(|&opener| range(&(opener..opener)));
+    structure
+        .items
+        .iter()
+        .for_each(|item| range(&(item.marker..item.end)));
+    structure
+        .quotes
+        .iter()
+        .for_each(|&quote| range(&(quote..quote)));
     structure.skipped.iter().for_each(&mut range);
     all
 }

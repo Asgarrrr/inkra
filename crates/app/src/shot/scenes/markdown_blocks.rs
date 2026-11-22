@@ -121,7 +121,7 @@ fn lists_end(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-pub(super) const SCENES: [Scene; 4] = [
+pub(super) const SCENES: [Scene; 9] = [
     Scene {
         name: "markdown-blocks",
         shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line under its text, and wrapped, beside a plain bullet: each task's box in a slot where the bullet's `•` is, on its first row, a slot's gap before its text, and its text in the bullet's text column; under the open task a nested task and a nested bullet, their box and `•` under the open task's text; an ordered task's number in its slot then its box, a task after a bullet its `•` then its box; open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw `2. [ ] ` ending at its text, which stays in the ordered task's text column",
@@ -142,4 +142,57 @@ pub(super) const SCENES: [Scene; 4] = [
         shows: "the same note's end: 1) to 3) on their own column; a quoted bullet's second line at its text; an ordered task's number then its box, its child under its text, then an empty `2.` on its row as `1.` sits on its own; a `•` on a heading's baseline, then an empty item's `•` where a typed item's sits; a task holding code: the caret on the closing fence shows both fences; the code block's lines, its blank line included, start at the task's text, and so does its background; `let y = 2;` keeps its own indent, four columns right of `if`",
         open: lists_end,
     },
+    Scene {
+        name: "list-enter-ordered",
+        shows: "`1. a` then enter: a `2.` on the next row, its number in the slot `1.` uses, the caret at its text start",
+        open: ordered,
+    },
+    Scene {
+        name: "list-enter-task",
+        shows: "`- [ ] a` then enter: a second, open box under the first, the caret right of it",
+        open: task,
+    },
+    Scene {
+        name: "list-enter-quoted",
+        shows: "`> - a` then enter: the new `•` inside the quote, its bar running down both rows, the caret at its text start",
+        open: quoted,
+    },
+    Scene {
+        name: "list-enter-leaves",
+        shows: "`- a` and an empty item, then enter: the empty item's marker gone, one `•` left, the caret on an empty plain line under it",
+        open: leaves,
+    },
+    Scene {
+        name: "list-enter-wider",
+        shows: "`9. a` over a child `- c`, then enter: an empty `10.` between them, `9.` and `10.` on one number column, the child's `•` still under the new item's text",
+        open: wider,
+    },
 ];
+
+/// `note` with `keys` pressed in it, focused.
+fn typed(stage: &mut Stage, note: &str, keys: &str) -> WindowHandle<AppShell> {
+    let window = stage.open_note(note);
+    stage.focus(window);
+    stage.keys(window, keys);
+    window
+}
+
+fn ordered(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "1. a", "cmd-down enter")
+}
+
+fn task(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "- [ ] a", "cmd-down enter")
+}
+
+fn quoted(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "> - a", "cmd-down enter")
+}
+
+fn leaves(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "- a\n- ", "cmd-down enter")
+}
+
+fn wider(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "9. a\n   - c", "cmd-up end enter")
+}

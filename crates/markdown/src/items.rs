@@ -9,6 +9,7 @@ use pulldown_cmark::{Event, Tag, TagEnd};
 use crate::Conceal;
 use crate::gutters::{Gutter, ItemPart, Task, WidthKey, gutter_at, quote_gutters};
 use crate::spans::{line_end, line_start, to_offsets};
+use crate::structure::Item;
 use walk::{Held, Walk};
 
 /// A gutter item as the parse met it.
@@ -160,14 +161,14 @@ impl Items {
     }
 
     /// The gutters, each held line's item part after its quote part, and what the parse keeps
-    /// beside them. `quotes` are the leading quotes' ranges, `items` every item's marker and
+    /// beside them. `quotes` are the leading quotes' ranges, `items` every item and
     /// `blocks` every code block's range without its last `\n`, all in document order. One walk,
     /// after the parse's one pass, so every width key is final (D1).
     pub(crate) fn gutters(
         self,
         text: &str,
         quotes: &[Range<usize>],
-        items: &[ByteOffset],
+        items: &[Item],
         blocks: impl Iterator<Item = Range<usize>>,
     ) -> ItemGutters {
         let quote_lines = quote_gutters(text, quotes);
@@ -184,9 +185,10 @@ impl Items {
         // The first line past the last marker line.
         let mut next = 0;
         while let Some(first) = rest.first() {
-            let marker = items[first.marker].get();
+            let marker = items[first.marker].marker.get();
             let line = line_start(text, marker);
-            let on_line = |item: &&Record| line_start(text, items[item.marker].get()) == line;
+            let on_line =
+                |item: &&Record| line_start(text, items[item.marker].marker.get()) == line;
             // `first` opens on the line, so `opening` holds at least it.
             let count = 1 + rest[1..].iter().take_while(on_line).count();
             let (opening, after) = rest.split_at(count);
@@ -208,7 +210,7 @@ impl Items {
             );
             let item = self.item_part(gutter.range.end, &walk.held, opening, &mut walk.keys);
             let end = item.task.as_ref().map_or_else(
-                || marker_end(text, items[last.marker].get()),
+                || marker_end(text, items[last.marker].marker.get()),
                 |task| task.checkbox.end.get(),
             );
             let blank = matches!(text.as_bytes().get(end), Some(b' ' | b'\t'));
@@ -283,10 +285,93 @@ pub(crate) fn marker_start(text: &str, item: usize) -> usize {
 /// The end of the marker at `marker`: one byte for a bullet, the digits and the `.` or `)` after
 /// them for a number (`CommonMark` 5.2).
 pub(crate) fn marker_end(text: &str, marker: usize) -> usize {
-    let digits = text.as_bytes()[marker..]
+    digits(text, marker).end + 1
+}
+
+/// The digits a marker at `marker` starts with: none for a bullet.
+fn digits(text: &str, marker: usize) -> Range<usize> {
+    let count = text.as_bytes()[marker..]
         .iter()
-        .take_while(|byte| byte.is_ascii_digit());
-    marker + 1 + digits.count()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    marker..marker + count
+}
+
+/// An item's marker, as `CommonMark` 5.2 reads it for its content start.
+pub(crate) struct Marker {
+    pub(crate) kind: MarkerKind,
+    /// Its end, past a number's delimiter.
+    pub(crate) end: usize,
+    pub(crate) content: Content,
+    /// The column its content starts at, counted from the line's start.
+    pub(crate) content_column: usize,
+}
+
+pub(crate) enum MarkerKind {
+    /// A `-`, `*` or `+`.
+    Bullet,
+    /// Its digits; its `.` or `)` runs from their end to the marker's end.
+    Number { digits: Range<usize> },
+}
+
+/// What follows an item's marker on its line (`CommonMark` 5.2).
+pub(crate) enum Content {
+    /// No blank: the item is empty.
+    Empty,
+    /// One to four columns of blanks, its content past them.
+    Blanks(Range<usize>),
+    /// Five columns of blanks or more: its content past one column, then indented code.
+    Indented,
+}
+
+impl Marker {
+    /// The marker at `marker`, on the line starting at `line`.
+    pub(crate) fn at(text: &str, line: usize, marker: usize) -> Self {
+        let bytes = text.as_bytes();
+        let digits = digits(text, marker);
+        let end = digits.end + 1;
+        let kind = if digits.is_empty() {
+            MarkerKind::Bullet
+        } else {
+            MarkerKind::Number { digits }
+        };
+        let len = bytes[end..]
+            .iter()
+            .take(5)
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        let after = column_after(0, &bytes[line..end]);
+        let blanks = &bytes[end..end + len];
+        let content = Content::read(after, end, blanks);
+        let content_column = Content::column(after, blanks);
+        Self {
+            kind,
+            end,
+            content,
+            content_column,
+        }
+    }
+}
+
+impl Content {
+    /// The content after a marker ending at column `after`, `blanks` its first blanks at byte
+    /// `at`.
+    fn read(after: usize, at: usize, blanks: &[u8]) -> Self {
+        match column_after(after, blanks) - after {
+            0 => Self::Empty,
+            1..=4 => Self::Blanks(at..at + blanks.len()),
+            _ => Self::Indented,
+        }
+    }
+
+    /// The column the content starts at after a marker ending at column `after`, `blanks` its
+    /// first blanks: past one to four columns of them, else one column past the marker.
+    pub(crate) fn column(after: usize, blanks: &[u8]) -> usize {
+        match column_after(after, blanks) - after {
+            columns @ 1..=4 => after + columns,
+            _ => after + 1,
+        }
+    }
 }
 
 /// The column after `bytes` from `column`, a tab stopping at the next multiple of 4 (`CommonMark` 2.2).
