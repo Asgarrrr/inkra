@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::{ByteOffset, Hunk};
 
 use crate::items::{MarkerBlanks, column_after};
-use crate::spans::{line_end, line_start};
+use crate::spans::{line_end, line_ranges, line_start, to_offsets};
 use crate::{Gutter, Markdown};
 
 pub use newline::continue_list;
@@ -33,7 +33,7 @@ impl ListEdit {
 
 fn hunk(range: Range<usize>, text: String) -> Hunk {
     Hunk {
-        range: ByteOffset::new(range.start)..ByteOffset::new(range.end),
+        range: to_offsets(range),
         text,
     }
 }
@@ -52,6 +52,20 @@ impl<'m> Line<'m> {
             range: start..line_end(text, start),
             gutter: markdown.gutter_on(ByteOffset::new(start)),
         }
+    }
+
+    /// The lines below it.
+    fn below<'t>(
+        &self,
+        text: &'t str,
+        markdown: &'m Markdown,
+    ) -> impl Iterator<Item = Line<'m>> + use<'t, 'm> {
+        line_ranges(text, self.range.start)
+            .skip(1)
+            .map(|range| Line {
+                gutter: markdown.gutter_on(ByteOffset::new(range.start)),
+                range,
+            })
     }
 
     /// The first byte past its quote part and item part.
@@ -109,28 +123,12 @@ impl<'m> Line<'m> {
     /// The line below, its container prefix to `column` in place of its leading blanks when it is
     /// lazy: a line `↩` leaves blank above it would end its paragraph (D2, rules 2, 6 and 8).
     fn lazy_below(&self, text: &str, markdown: &Markdown, column: usize) -> Option<Hunk> {
-        let below = Line::at(
-            text,
-            markdown,
-            (self.range.end < text.len()).then_some(self.range.end + 1)?,
-        );
+        let below = self.below(text, markdown).next()?;
         below.is_lazy(text, markdown).then(|| {
             let prefix = container_prefix(text, markdown, below.range.start, column);
             hunk(below.range.start..below.lead_end(text), prefix)
         })
     }
-}
-
-/// The lines from the line start `from` that start before `end`.
-fn lines_before(text: &str, from: usize, end: usize) -> impl Iterator<Item = Range<usize>> + '_ {
-    let mut next = from;
-    std::iter::from_fn(move || {
-        (next < end && next <= text.len()).then(|| {
-            let line = next..line_end(text, next);
-            next = line.end + 1;
-            line
-        })
-    })
 }
 
 fn is_blank(byte: u8) -> bool {

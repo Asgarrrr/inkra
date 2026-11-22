@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use super::shift::shifted;
-use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk, lines_before};
+use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk};
 use crate::Markdown;
 use crate::items::{MarkerBlanks, marker_end};
 use crate::structure::innermost_item;
@@ -138,8 +138,10 @@ fn on_marker_line(
         return ListEdit::replace(text_start + typed..caret, format!("\n{prefix}"));
     }
     let end = markdown.structure.items[item].end.get();
-    let holds = lines_before(text, line.range.end + 1, end)
-        .any(|held| !Line::at(text, markdown, held.start).is_blank(text));
+    let holds = line
+        .below(text, markdown)
+        .take_while(|held| held.range.start < end)
+        .any(|held| !held.is_blank(text));
     match (typed, rest_blank) {
         (0, true) if !holds => leave(line),
         (0, false) => above(text, markdown, line, item, caret),
@@ -167,8 +169,11 @@ fn continued(
 ) -> ListEdit {
     let cut = cut.start..cut.end + blanks(&text[cut.end..line.range.end]);
     let end = markdown.structure.items[item].end.get();
-    let blank = |held: &Range<usize>| Line::at(text, markdown, held.start).is_blank(text);
-    let mut below = lines_before(text, line.range.end + 1, end).peekable();
+    let blank = |held: &Line<'_>| held.is_blank(text);
+    let mut below = line
+        .below(text, markdown)
+        .take_while(|held| held.range.start < end)
+        .peekable();
     let mut last_blank = None;
     while let Some(held) = below.next_if(blank) {
         last_blank = Some(held);
@@ -179,6 +184,7 @@ fn continued(
     let past_blanks = last_blank.filter(|_| rest_blank && below.peek().is_some());
     let (mut edit, moved) = match past_blanks {
         Some(held) => {
+            let held = held.range;
             let caret = held.end - cut.len() + inserted.len();
             let gone = (!cut.is_empty()).then(|| hunk(cut.clone(), String::new()));
             let hunks = gone.into_iter().chain([hunk(held.end..held.end, inserted)]);
@@ -197,11 +203,13 @@ fn continued(
     let shift = column.saturating_sub(content_column(text, markdown, item));
     // Only a shift reaches past the first line the new item takes.
     let reach = if shift == 0 { 1 } else { usize::MAX };
-    let held = lines_before(text, moved, end)
-        .map(|held| {
+    let held = line
+        .below(text, markdown)
+        .skip_while(|held| held.range.start < moved)
+        .take_while(|held| held.range.start < end)
+        .inspect(|_| {
             #[cfg(test)]
             MOVED_READ.set(MOVED_READ.get() + 1);
-            Line::at(text, markdown, held.start)
         })
         .filter(|held| !held.is_blank(text))
         .take(reach);
