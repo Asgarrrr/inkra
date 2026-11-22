@@ -90,3 +90,6 @@ pub(crate) fn last_before<T, K: Ord + Copy>(
         .partition_point(|element| key(element) < at)
         .checked_sub(1)
 }
+
+#[cfg(test)]
+mod tests;

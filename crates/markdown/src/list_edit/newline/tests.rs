@@ -378,3 +378,31 @@ fn enter_runs_one_fallback_pass_at_most() {
         assert!(FALLBACKS.get() <= 1, "{case:?}");
     }
 }
+
+/// Trailing blanks above the lines an item holds go with the cut, in the one hunk (D9).
+#[test]
+fn trailing_blanks_above_held_lines_are_cut_in_one_hunk() {
+    let edit = continue_list("- a \n  b", &parse("- a \n  b"), ByteOffset::new(4));
+    assert_eq!(edit.map(|edit| edit.hunks.len()), Some(1));
+    check(&[("- a |\n  b", "- a\n- |\n  b")]);
+}
+
+/// Rule 7's blank line keeps the quote part without the blank after its last `>`.
+#[test]
+fn a_blank_line_above_a_quoted_first_item_drops_the_blank_after_its_quote() {
+    check(&[("> para\n> 1. |abc", "> para\n>\n> 1. |abc")]);
+}
+
+/// A blank line between two items lies in neither.
+#[test]
+fn a_blank_line_between_items_takes_the_plain_key() {
+    for case in ["- a\n|\n- b", "1. a\n|\n2. b"] {
+        assert_eq!(enter(case), None, "{case:?}");
+    }
+}
+
+/// An underline's `-` is an empty marker whose text start lies past it (D8, rule 9).
+#[test]
+fn before_an_underlines_marker_the_plain_key_goes_in() {
+    assert_eq!(enter("para\n|-"), None);
+}
