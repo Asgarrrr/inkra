@@ -129,30 +129,22 @@ fn on_marker_line(
     item: usize,
     caret: usize,
 ) -> ListEdit {
-    let text_start = line.text_start();
-    let typed = text[text_start..caret].trim_end_matches([' ', '\t']).len();
-    let rest_blank = blanks(&text[caret..line.range.end]) == line.range.end - caret;
+    let typed_end = line.typed_end(text, caret);
     if opens_code(markdown, line) {
         let column = content_column(text, markdown, item);
         let prefix = container_prefix(text, markdown, line.range.start, column);
-        return ListEdit::replace(text_start + typed..caret, format!("\n{prefix}"));
+        return ListEdit::replace(typed_end..caret, format!("\n{prefix}"));
     }
     let end = markdown.structure.items[item].end.get();
     let holds = line
         .below(text, markdown)
         .take_while(|held| held.range.start < end)
         .any(|held| !held.is_blank(text));
-    match (typed, rest_blank) {
-        (0, true) if !holds => leave(line),
-        (0, false) => above(text, markdown, line, item, caret),
-        _ => continued(
-            text,
-            markdown,
-            line,
-            item,
-            text_start + typed..caret,
-            rest_blank,
-        ),
+    let rest_blank = line.is_blank_past(text, caret);
+    match (typed_end > line.text_start(), rest_blank) {
+        (false, true) if !holds => leave(line),
+        (false, false) => above(text, markdown, line, item, caret),
+        _ => continued(text, markdown, line, item, typed_end..caret, rest_blank),
     }
 }
 
@@ -311,17 +303,16 @@ fn split(
     caret: usize,
     column: usize,
 ) -> ListEdit {
-    let text_start = line.text_start();
-    let typed = text[text_start..caret].trim_end_matches([' ', '\t']).len();
+    let typed_end = line.typed_end(text, caret);
     let prefix = container_prefix(text, markdown, line.range.start, column);
-    let (start, left) = if typed == 0 {
+    let (start, left) = if typed_end == line.text_start() {
         let quote = container_prefix(text, markdown, line.range.start, 0);
         (line.range.start, quote.trim_end().to_owned())
     } else {
-        (text_start + typed, String::new())
+        (typed_end, String::new())
     };
     let mut edit = ListEdit::replace(start..caret, format!("{left}\n{prefix}"));
-    if blanks(&text[caret..line.range.end]) == line.range.end - caret {
+    if line.is_blank_past(text, caret) {
         edit.hunks.extend(line.lazy_below(text, markdown, column));
     }
     edit

@@ -101,7 +101,19 @@ impl<'m> Line<'m> {
 
     /// Whether it has only blanks past its quote part.
     fn is_blank(&self, text: &str) -> bool {
-        self.lead_end(text) == self.range.end
+        self.is_blank_past(text, self.quote_end())
+    }
+
+    /// Whether it has only blanks past `at`, a byte on it.
+    fn is_blank_past(&self, text: &str, at: usize) -> bool {
+        blanks(&text[at..self.range.end]) == self.range.end - at
+    }
+
+    /// The end of its text before `caret`, without the blanks before `caret`; its text start when
+    /// it has none.
+    fn typed_end(&self, text: &str, caret: usize) -> usize {
+        let start = self.text_start();
+        start + text[start..caret].trim_end_matches([' ', '\t']).len()
     }
 
     /// Whether it continues the paragraph above only by laziness: no item opens on it, and it shows
