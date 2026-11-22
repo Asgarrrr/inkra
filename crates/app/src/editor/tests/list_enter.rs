@@ -129,3 +129,16 @@ fn enter_on_a_stale_parse_edits_nothing(cx: &mut TestAppContext) {
         .unwrap();
     assert_eq!(text(&window, &mut cx), "- a!");
 }
+
+/// Each key reads the parse of the edit before it, with no frame between them.
+#[gpui::test]
+fn keys_in_a_row_each_read_the_last_edits_parse(cx: &mut TestAppContext) {
+    for (note, keys, want) in [
+        ("- a", "enter enter", "- a\n"),
+        ("1. a", "enter b enter", "1. a\n2. b\n3. "),
+    ] {
+        let (window, mut cx) = dispatching(cx, note);
+        cx.simulate_keystrokes(keys);
+        assert_eq!(text(&window, &mut cx), want, "{note:?} {keys:?}");
+    }
+}

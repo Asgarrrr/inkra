@@ -105,6 +105,10 @@ runs no pass over the note. It stamps its `Diff` with `parsed_at`, not with the 
 (D9). A parse that lags the text makes the command edit nothing: the handler checks `parsed_at`
 before it calls `continue_list`.
 
+A test presses `enter enter` and `enter b enter` with no frame between the keys
+(`editor/tests/list_enter.rs`). It fails when `reshape` skips `refresh`, so a parse that lags one
+frame would show as a dropped second key.
+
 ## What the references do
 
 ### Zed
@@ -682,6 +686,8 @@ the indent, held lines, lazy lines and code blocks in items, nesting up to four:
 - `cmd-z` after each restores the text in one step, and puts the caret where D9's table says: one
   test per row, rule 7, D3 nested and rule 2 at the text start included.
 - A command on a stale parse, made by a write that skips `refresh`, edits nothing.
+- Keys pressed in a row each read the previous edit's parse: `- a` then `enter enter` leaves the
+  list, `1. a` then `enter b enter` gives `3. `.
 - The caret of a `ListEdit` snaps against the new parse: `- a\n  b |\n  c` with `enter` lands at
   the new line's text start, not at 13. `backspace` on `- a\n- |\n  3. c` gives `- a|\n  1. c`.
 - `keymap/tests.rs` passes: `tab` and `shift-tab` are bound in the editor context alone.
