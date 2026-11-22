@@ -5,19 +5,16 @@ use std::cell::RefCell;
 use std::ops::Range;
 
 use gpui::{
-    ClipboardItem, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext,
-    WindowHandle, point, px,
+    ClipboardItem, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point,
+    px,
 };
 use inkra_editor::Selection;
 use inkra_text::Bias;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
-use super::{at, close, dispatching};
-use crate::editor::{EditorView, ViewState};
-use crate::text_input::InputHost;
-
-type Handle = WindowHandle<EditorView>;
+use super::{Handle, at, close, editor, state};
+use crate::editor::ViewState;
 
 /// A held line after a marker line: inside 4..6, edge 3, text start 6.
 const HELD: &str = "- a\n  b\n\nbody";
@@ -25,34 +22,6 @@ const HELD: &str = "- a\n  b\n\nbody";
 const QUOTED: &str = "> - a\n>   b\n\nbody";
 /// A code line in a task: inside 15..17, edge 14, text start 17.
 const CODE: &str = "- [ ] a\n\n  ```\n  x\n  ```\n\nbody";
-
-/// The editor on `text`, drawn, its caret at `caret` or past the atom holding it.
-fn editor(cx: &mut TestAppContext, text: &str, caret: usize) -> (Handle, VisualTestContext) {
-    let (window, mut cx) = dispatching(cx, text);
-    cx.run_until_parked();
-    window
-        .update(&mut cx, |view, window, cx| {
-            let snap = view.snap();
-            view.move_cursor(window, cx, |state, buffer| {
-                state.move_to(buffer, at(caret), false, snap);
-            });
-        })
-        .unwrap();
-    (window, cx)
-}
-
-/// The text, the selection, and whether its head is its start.
-fn state(window: &Handle, cx: &mut VisualTestContext) -> (String, Range<usize>, bool) {
-    cx.run_until_parked();
-    window
-        .update(cx, |view, _, cx| {
-            let selection = view.input.state().selection();
-            let range = selection.start().get()..selection.end().get();
-            let text = view.buffer().read(cx).text().to_owned();
-            (text, range, selection.reversed())
-        })
-        .unwrap()
-}
 
 fn after(
     cx: &mut TestAppContext,

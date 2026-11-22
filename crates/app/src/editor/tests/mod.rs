@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::ops::Range;
 use std::rc::Rc;
 
 use gpui::{
@@ -8,6 +9,7 @@ use inkra_text::{Buffer, ByteOffset};
 
 use super::EditorView;
 use crate::keymap::key_bindings;
+use crate::text_input::InputHost;
 
 mod atoms;
 mod carry;
@@ -45,6 +47,40 @@ mod task_key;
 mod task_marks;
 mod task_widths;
 mod wrap;
+
+pub(super) type Handle = gpui::WindowHandle<EditorView>;
+
+/// The editor on `text`, drawn, its caret at `caret` or past the atom holding it.
+pub(super) fn editor(
+    cx: &mut TestAppContext,
+    text: &str,
+    caret: usize,
+) -> (Handle, VisualTestContext) {
+    let (window, mut cx) = dispatching(cx, text);
+    cx.run_until_parked();
+    window
+        .update(&mut cx, |view, window, cx| {
+            let snap = view.snap();
+            view.move_cursor(window, cx, |state, buffer| {
+                state.move_to(buffer, at(caret), false, snap);
+            });
+        })
+        .unwrap();
+    (window, cx)
+}
+
+/// The text, the selection, and whether its head is its start.
+pub(super) fn state(window: &Handle, cx: &mut VisualTestContext) -> (String, Range<usize>, bool) {
+    cx.run_until_parked();
+    window
+        .update(cx, |view, _, cx| {
+            let selection = view.input.state().selection();
+            let range = selection.start().get()..selection.end().get();
+            let text = view.buffer().read(cx).text().to_owned();
+            (text, range, selection.reversed())
+        })
+        .unwrap()
+}
 
 pub(super) fn with_editor<R>(
     cx: &mut TestAppContext,

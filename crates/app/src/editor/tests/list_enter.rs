@@ -1,48 +1,19 @@
 //! `↩` continues a list, a quote or an item's text, leaves an empty item, and undoes in one step
 //! (list editing spec, D2, D3, D9).
 
-use gpui::{TestAppContext, VisualTestContext, WindowHandle};
-use inkra_editor::Selection;
+use gpui::TestAppContext;
 
-use super::{at, dispatching};
+use super::{at, dispatching, editor, state};
 use crate::editor::actions::Newline;
-use crate::editor::{EditorView, TopLine, ViewState};
-
-type Handle = WindowHandle<EditorView>;
-
-fn text(window: &Handle, cx: &mut VisualTestContext) -> String {
-    window
-        .update(cx, |view, _, cx| view.buffer().read(cx).text().to_owned())
-        .unwrap()
-}
-
-fn caret(window: &Handle, cx: &mut VisualTestContext) -> usize {
-    window.update(cx, |view, _, _| view.cursor().get()).unwrap()
-}
-
-fn place(window: &Handle, cx: &mut VisualTestContext, offset: usize) {
-    window
-        .update(cx, |view, _, cx| {
-            let view_state = ViewState {
-                selection: Selection::at(at(offset)),
-                top: TopLine::at(at(0)),
-                scrolls: Vec::new(),
-            };
-            view.restore(view_state, cx);
-        })
-        .unwrap();
-}
 
 #[gpui::test]
 fn enter_continues_an_item_then_leaves_the_empty_one(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "- a");
     cx.simulate_keystrokes("enter");
-    assert_eq!(text(&window, &mut cx), "- a\n- ");
-    assert_eq!(caret(&window, &mut cx), 6);
+    assert_eq!(state(&window, &mut cx), ("- a\n- ".to_owned(), 6..6, false));
 
     cx.simulate_keystrokes("enter");
-    assert_eq!(text(&window, &mut cx), "- a\n");
-    assert_eq!(caret(&window, &mut cx), 4);
+    assert_eq!(state(&window, &mut cx), ("- a\n".to_owned(), 4..4, false));
 }
 
 /// Each row: the note, the caret, the text and caret after `enter`, and the caret after `cmd-z`,
@@ -72,26 +43,24 @@ fn cmd_z_undoes_enter_in_one_step(cx: &mut TestAppContext) {
         // Rule 2 at the text start.
         ("- a\n  b", 6, "- a\n\n  b", 7, 6),
     ] {
-        let (window, mut cx) = dispatching(cx, note);
-        place(&window, &mut cx, from);
+        let (window, mut cx) = editor(cx, note, from);
         cx.simulate_keystrokes("enter");
-        assert_eq!(text(&window, &mut cx), entered, "{note:?} at {from}");
-        assert_eq!(caret(&window, &mut cx), landed, "{note:?} at {from}");
+        let want = (entered.to_owned(), landed..landed, false);
+        assert_eq!(state(&window, &mut cx), want, "{note:?} at {from}");
 
         cx.simulate_keystrokes("cmd-z");
-        assert_eq!(text(&window, &mut cx), note, "{note:?} at {from}");
-        assert_eq!(caret(&window, &mut cx), undone, "{note:?} at {from}");
+        let want = (note.to_owned(), undone..undone, false);
+        assert_eq!(state(&window, &mut cx), want, "{note:?} at {from}");
     }
 }
 
 /// The parse before the edit would snap the new caret against old atoms, to 13.
 #[gpui::test]
 fn the_caret_lands_at_the_new_lines_text_start(cx: &mut TestAppContext) {
-    let (window, mut cx) = dispatching(cx, "- a\n  b \n  c");
-    place(&window, &mut cx, 8);
+    let (window, mut cx) = editor(cx, "- a\n  b \n  c", 8);
     cx.simulate_keystrokes("enter");
-    assert_eq!(text(&window, &mut cx), "- a\n  b\n  \n  c");
-    assert_eq!(caret(&window, &mut cx), 10);
+    let want = ("- a\n  b\n  \n  c".to_owned(), 10..10, false);
+    assert_eq!(state(&window, &mut cx), want);
 }
 
 /// A plain `↩` still merges with the typing around it.
@@ -101,9 +70,9 @@ fn enter_on_a_paragraph_inserts_a_newline_in_the_typing_run(cx: &mut TestAppCont
     cx.simulate_input("ab");
     cx.simulate_keystrokes("enter");
     cx.simulate_input("cd");
-    assert_eq!(text(&window, &mut cx), "ab\ncd");
+    assert_eq!(state(&window, &mut cx).0, "ab\ncd");
     cx.simulate_keystrokes("cmd-z");
-    assert_eq!(text(&window, &mut cx), "");
+    assert_eq!(state(&window, &mut cx).0, "");
 }
 
 /// A selection takes the plain key, even inside an item.
@@ -111,7 +80,7 @@ fn enter_on_a_paragraph_inserts_a_newline_in_the_typing_run(cx: &mut TestAppCont
 fn enter_on_a_selection_replaces_it_with_a_newline(cx: &mut TestAppContext) {
     let (window, mut cx) = dispatching(cx, "- ab");
     cx.simulate_keystrokes("shift-left enter");
-    assert_eq!(text(&window, &mut cx), "- a\n");
+    assert_eq!(state(&window, &mut cx).0, "- a\n");
 }
 
 /// A write that skips `refresh` leaves the parse behind the text: the key edits nothing.
@@ -127,7 +96,7 @@ fn enter_on_a_stale_parse_edits_nothing(cx: &mut TestAppContext) {
             view.newline(&Newline, window, cx);
         })
         .unwrap();
-    assert_eq!(text(&window, &mut cx), "- a!");
+    assert_eq!(state(&window, &mut cx).0, "- a!");
 }
 
 /// Each key reads the parse of the edit before it, with no frame between them.
@@ -139,6 +108,6 @@ fn keys_in_a_row_each_read_the_last_edits_parse(cx: &mut TestAppContext) {
     ] {
         let (window, mut cx) = dispatching(cx, note);
         cx.simulate_keystrokes(keys);
-        assert_eq!(text(&window, &mut cx), want, "{note:?} {keys:?}");
+        assert_eq!(state(&window, &mut cx).0, want, "{note:?} {keys:?}");
     }
 }
