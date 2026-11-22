@@ -58,6 +58,6 @@ pub(super) fn unheld_quoted_code(text: &str, markdown: &Markdown, caret: usize) 
         line_start(text, block.range.start.get()) <= line && line <= block.range.end.get()
     });
     coded
-        && Doc { text, markdown }.holder(line).is_none()
+        && Doc { text, markdown }.line_at(line).holder().is_none()
         && markdown.gutter_on(ByteOffset::new(line)).is_some()
 }

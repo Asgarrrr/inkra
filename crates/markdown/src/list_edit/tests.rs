@@ -10,7 +10,8 @@ fn holder_marker(text: &str, line: usize) -> Option<usize> {
         text,
         markdown: &markdown,
     };
-    doc.holder(line)
+    doc.line_at(line)
+        .holder()
         .map(|at| markdown.structure.items[at].marker.get())
 }
 
@@ -52,7 +53,7 @@ fn the_container_prefix_holds_the_new_line_in_its_quotes_and_items() {
             markdown: &markdown,
         };
         assert_eq!(
-            doc.container_prefix(line, column),
+            doc.line_at(line).container_prefix(column),
             want,
             "{text:?} at {line}"
         );

@@ -64,19 +64,6 @@ impl<'a> Doc<'a> {
         }
     }
 
-    /// The innermost gutter item holding the line starting at `line`: the last item whose marker
-    /// lies before it, walked up through its parents until a gutter item ends past it (D1).
-    fn holder(self, line: usize) -> Option<usize> {
-        let items = &self.markdown.structure.items;
-        let mut at = last_before(items, line, |item| item.marker.get())?;
-        loop {
-            if items[at].end.get() > line && self.is_gutter_item(at) {
-                return Some(at);
-            }
-            at = items[at].parent()?;
-        }
-    }
-
     /// Whether item `at` is a gutter item: its marker lies in its marker line's gutter, so in its
     /// item part, since no marker lies in a quote part.
     fn is_gutter_item(self, at: usize) -> bool {
@@ -92,15 +79,45 @@ impl<'a> Doc<'a> {
         let marker = self.markdown.structure.items[at].marker.get();
         Marker::at(self.text, line_start(self.text, marker), marker).content_column
     }
+}
 
-    /// What follows a `\n` that starts a line in the quotes of the line at `line`: its `>`s, then
-    /// spaces to `column` (D2).
-    fn container_prefix(self, line: usize, column: usize) -> String {
-        let Self { text, markdown } = self;
+/// A line as the parse reads it: its range without its `\n`, and its gutter.
+struct Line<'a> {
+    doc: Doc<'a>,
+    range: Range<usize>,
+    gutter: Option<&'a Gutter>,
+}
+
+impl<'a> Line<'a> {
+    /// The lines below it.
+    fn below(&self) -> impl Iterator<Item = Line<'a>> + use<'a> {
+        let doc = self.doc;
+        line_ranges(doc.text, self.range.start)
+            .skip(1)
+            .map(move |range| doc.line(range))
+    }
+
+    /// The innermost gutter item holding it: the last item whose marker lies before it, walked up
+    /// through its parents until a gutter item ends past it (D1).
+    fn holder(&self) -> Option<usize> {
+        let line = self.range.start;
+        let items = &self.doc.markdown.structure.items;
+        let mut at = last_before(items, line, |item| item.marker.get())?;
+        loop {
+            if items[at].end.get() > line && self.doc.is_gutter_item(at) {
+                return Some(at);
+            }
+            at = items[at].parent()?;
+        }
+    }
+
+    /// What follows a `\n` that starts a line in its quotes: their `>`s, then spaces to `column`
+    /// (D2).
+    fn container_prefix(&self, column: usize) -> String {
+        let Doc { text, markdown } = self.doc;
+        let line = self.range.start;
         let mut prefix = String::new();
-        let depth = markdown
-            .gutter_on(ByteOffset::new(line))
-            .map_or(0, |gutter| gutter.depth);
+        let depth = self.gutter.map_or(0, |gutter| gutter.depth);
         let at = markdown
             .gutters
             .partition_point(|gutter| gutter.range.start.get() <= line);
@@ -121,23 +138,6 @@ impl<'a> Doc<'a> {
         let written = column_after(0, prefix.as_bytes());
         prefix.extend(std::iter::repeat_n(' ', column.saturating_sub(written)));
         prefix
-    }
-}
-
-/// A line as the parse reads it: its range without its `\n`, and its gutter.
-struct Line<'a> {
-    doc: Doc<'a>,
-    range: Range<usize>,
-    gutter: Option<&'a Gutter>,
-}
-
-impl<'a> Line<'a> {
-    /// The lines below it.
-    fn below(&self) -> impl Iterator<Item = Line<'a>> + use<'a> {
-        let doc = self.doc;
-        line_ranges(doc.text, self.range.start)
-            .skip(1)
-            .map(move |range| doc.line(range))
     }
 
     /// The first byte past its quote part and item part.
@@ -202,8 +202,7 @@ impl<'a> Line<'a> {
             && !self.is_blank()
             && (gutter.is_some_and(|gutter| gutter.quotes.len() < gutter.depth)
                 || self
-                    .doc
-                    .holder(self.range.start)
+                    .holder()
                     .is_some_and(|at| self.column(self.lead_end()) < self.doc.content_column(at)))
     }
 
@@ -211,7 +210,7 @@ impl<'a> Line<'a> {
     /// blank line above would end (D2, rules 2, 6 and 8).
     fn lazy_prefix(&self, column: usize) -> Option<Hunk> {
         self.is_lazy().then(|| {
-            let prefix = self.doc.container_prefix(self.range.start, column);
+            let prefix = self.container_prefix(column);
             hunk(self.range.start..self.lead_end(), prefix)
         })
     }

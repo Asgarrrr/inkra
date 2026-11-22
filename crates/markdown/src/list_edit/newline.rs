@@ -28,7 +28,7 @@ pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Opti
     if let Some(item) = caret_item(&line) {
         return Some(on_marker_line(&line, item, caret));
     }
-    let holder = doc.holder(line.range.start);
+    let holder = line.holder();
     if in_code(&line) {
         // A code line keeps its blanks before its leaf text start.
         let gutter = line.gutter?;
@@ -113,34 +113,22 @@ fn on_marker_line(line: &Line<'_>, item: usize, caret: usize) -> ListEdit {
     let doc = line.doc;
     let typed_end = line.typed_end(caret);
     if opens_code(line) {
-        let prefix = doc.container_prefix(line.range.start, doc.content_column(item));
+        let prefix = line.container_prefix(doc.content_column(item));
         return ListEdit::replace(typed_end..caret, format!("\n{prefix}"));
     }
-    let text_before = typed_end > line.text_start();
-    let gesture = if text_before {
-        Gesture::Continue
+    if typed_end > line.text_start() {
+        // Past an item's text, the next sibling (rule 6).
+        continued(line, item, typed_end..caret)
     } else if !line.is_blank_past(caret) {
-        Gesture::Above
+        // At the text start of an item with text, a line goes above it (rule 7).
+        above(line, item, caret)
     } else if held(line, item).next().is_some() {
-        Gesture::Continue
+        // An empty marker line that holds lines takes the next sibling (rule 6).
+        continued(line, item, typed_end..caret)
     } else {
-        Gesture::Leave
-    };
-    match gesture {
-        Gesture::Leave => leave(line),
-        Gesture::Above => above(line, item, caret),
-        Gesture::Continue => continued(line, item, typed_end..caret),
+        // An empty item that holds no line leaves its list (D3).
+        leave(line)
     }
-}
-
-/// What `↩` does on a marker line at or past its text start.
-enum Gesture {
-    /// An empty item that holds no line leaves its list (D3).
-    Leave,
-    /// At the text start of an item with text, a line goes above it (rule 7).
-    Above,
-    /// Past an item's text, or on an empty marker line that holds lines, the next sibling (rule 6).
-    Continue,
 }
 
 /// The next sibling, in place of `cut` and the blanks after it (D2, rule 6, D7).
@@ -218,7 +206,7 @@ struct Continuation {
 fn continuation(line: &Line<'_>, item: usize, step: u64) -> Continuation {
     let Doc { text, markdown } = line.doc;
     let at = markdown.structure.items[item].marker.get();
-    let mut out = line.doc.container_prefix(line.range.start, line.column(at));
+    let mut out = line.container_prefix(line.column(at));
     let marker = Marker::at(text, line.range.start, at);
     match &marker.kind {
         MarkerKind::Number { digits } => {
@@ -256,12 +244,11 @@ fn continuation(line: &Line<'_>, item: usize, step: u64) -> Continuation {
 /// `\n` and the container prefix to `column`, in place of the blanks before `caret` (D2, rules 2
 /// and 8).
 fn split(line: &Line<'_>, caret: usize, column: usize) -> ListEdit {
-    let doc = line.doc;
     let typed_end = line.typed_end(caret);
-    let prefix = doc.container_prefix(line.range.start, column);
+    let prefix = line.container_prefix(column);
     // Not the line's own quote part, as `above` copies: a lazy line shows fewer `>` than it is in.
     let (start, left) = if typed_end == line.text_start() {
-        let quote = doc.container_prefix(line.range.start, 0);
+        let quote = line.container_prefix(0);
         (line.range.start, quote.trim_end().to_owned())
     } else {
         (typed_end, String::new())
