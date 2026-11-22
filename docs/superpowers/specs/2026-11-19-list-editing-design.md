@@ -589,7 +589,7 @@ lands at the end of that hunk's restored text. The owner accepts it (Open questi
 
 | Command | Caret after `⌘Z` |
 |---|---|
-| `↩` rule 2, 3, 6 or 8, one hunk | Where it was: the hunk ends at the caret. |
+| `↩` rule 2, 3, 6 or 8 on the caret's line alone (rule 6 with blanks after the caret writes the cut and the new line as two adjacent hunks) | Where it was: the last hunk ends at the caret. |
 | `↩` rule 6 with moved lines, a lazy-line prefix, a width shift or a renumbering; rule 2 or 8 with a lazy-line prefix | At the end of the lowest hunk, on a line below. |
 | `↩` rule 6 written after blank lines | At the end of the lowest hunk: the new marker line's start or a moved line. |
 | `↩` rule 7, either form | At the marker line's start, before the item part: the hunk is an insertion there. |
@@ -801,6 +801,8 @@ generator never writes the last two.
 - In L1, `↩` on a nested empty item on the same line as its parent, `- - |`, deletes the whole item
   part, the parent's marker included. L2's D3 nested case replaces it.
 - Rule 3 fires on an indented code block that opens on a marker line (D2, rule 3).
+- A sibling of `999999999.` is numbered `1000000000.`, which `CommonMark` (9 digits at most) reads
+  as text. Found by the final L1 verification; no note reaches it by hand.
 
 ## Deferred
 
