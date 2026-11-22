@@ -9,7 +9,7 @@ use inkra_text::ByteOffset;
 use super::shift::shifted;
 use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk};
 use crate::Markdown;
-use crate::items::{MarkerBlanks, marker_end};
+use crate::items::{Content, Marker, MarkerKind, marker_end};
 use crate::spans::{first_from, last_before};
 use crate::structure::Fallback;
 
@@ -140,7 +140,7 @@ fn continued(
     let empty = line.is_blank_past(text, cut.end);
     let cut = cut.start..cut.end + blanks(&text[cut.end..line.range.end]);
     let (continuation, marker) = continuation(text, markdown, line, item, 1);
-    let column = MarkerBlanks::at(&continuation, 0, marker).content_column();
+    let column = Marker::at(&continuation, 0, marker).content_column;
     let shift = column.saturating_sub(content_column(text, markdown, item));
     let mut moved = moved(text, markdown, line, item, shift);
     let first = moved.next();
@@ -231,27 +231,31 @@ fn continuation(
     at: usize,
     step: u64,
 ) -> (String, usize) {
-    let marker = markdown.structure.items[at].marker.get();
-    let mut out = container_prefix(text, markdown, line.range.start, line.column(text, marker));
+    let at = markdown.structure.items[at].marker.get();
+    let mut out = container_prefix(text, markdown, line.range.start, line.column(text, at));
     let offset = out.len();
-    let blanks = MarkerBlanks::at(text, line.range.start, marker);
-    let digits = &text[marker..blanks.end - 1];
-    match digits.parse::<u64>() {
-        Ok(number) => {
-            let number = (number + step).to_string();
+    let marker = Marker::at(text, line.range.start, at);
+    let number = match &marker.kind {
+        MarkerKind::Number { digits } => text[digits.clone()]
+            .parse::<u64>()
+            .ok()
+            .map(|number| (digits.clone(), (number + step).to_string())),
+        MarkerKind::Bullet => None,
+    };
+    match number {
+        Some((digits, number)) => {
             out.extend(iter::repeat_n(
                 '0',
                 digits.len().saturating_sub(number.len()),
             ));
             out.push_str(&number);
-            out.push_str(&text[blanks.end - 1..blanks.end]);
+            out.push_str(&text[digits.end..marker.end]);
         }
-        Err(_) => out.push_str(&text[marker..blanks.end]),
+        None => out.push_str(&text[at..marker.end]),
     }
-    if (1..=4).contains(&blanks.columns) {
-        out.push_str(&text[blanks.end..blanks.end + blanks.len]);
-    } else {
-        out.push(' ');
+    match &marker.content {
+        Content::Blanks(blanks) => out.push_str(&text[blanks.clone()]),
+        Content::Empty | Content::Indented => out.push(' '),
     }
     let task = line
         .gutter

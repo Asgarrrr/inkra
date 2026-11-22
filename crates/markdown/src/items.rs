@@ -285,51 +285,81 @@ pub(crate) fn marker_start(text: &str, item: usize) -> usize {
 /// The end of the marker at `marker`: one byte for a bullet, the digits and the `.` or `)` after
 /// them for a number (`CommonMark` 5.2).
 pub(crate) fn marker_end(text: &str, marker: usize) -> usize {
-    let digits = text.as_bytes()[marker..]
+    digits(text, marker).end + 1
+}
+
+/// The digits a marker at `marker` starts with: none for a bullet.
+fn digits(text: &str, marker: usize) -> Range<usize> {
+    let count = text.as_bytes()[marker..]
         .iter()
-        .take_while(|byte| byte.is_ascii_digit());
-    marker + 1 + digits.count()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    marker..marker + count
 }
 
-/// The blanks after an item's marker, as `CommonMark` 5.2 counts them for its content start.
-pub(crate) struct MarkerBlanks {
-    /// The marker's end.
+/// An item's marker, as `CommonMark` 5.2 reads it for its content start.
+pub(crate) struct Marker {
+    pub(crate) kind: MarkerKind,
+    /// Its end, past a number's delimiter.
     pub(crate) end: usize,
-    /// Their bytes, at most five.
-    pub(crate) len: usize,
-    /// Their columns.
-    pub(crate) columns: usize,
-    /// The marker end's column, counted from the line's start.
-    after: usize,
+    pub(crate) content: Content,
+    /// The column its content starts at, counted from the line's start.
+    pub(crate) content_column: usize,
 }
 
-impl MarkerBlanks {
-    /// The blanks after the marker at `marker`, on the line starting at `line`.
+pub(crate) enum MarkerKind {
+    /// A `-`, `*` or `+`.
+    Bullet,
+    /// Its digits; its `.` or `)` runs from their end to the marker's end.
+    Number { digits: Range<usize> },
+}
+
+/// What follows an item's marker on its line (`CommonMark` 5.2).
+pub(crate) enum Content {
+    /// No blank: the item is empty.
+    Empty,
+    /// One to four columns of blanks, its content past them.
+    Blanks(Range<usize>),
+    /// Five columns of blanks or more: its content past one column, then indented code.
+    Indented,
+}
+
+impl Marker {
+    /// The marker at `marker`, on the line starting at `line`.
     pub(crate) fn at(text: &str, line: usize, marker: usize) -> Self {
         let bytes = text.as_bytes();
-        let end = marker_end(text, marker);
+        let digits = digits(text, marker);
+        let end = digits.end + 1;
+        let kind = if digits.is_empty() {
+            MarkerKind::Bullet
+        } else {
+            MarkerKind::Number { digits }
+        };
         let len = bytes[end..]
             .iter()
             .take(5)
             .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
             .count();
         let after = column_after(0, &bytes[line..end]);
+        let (content, content_column) = Content::read(after, end, &bytes[end..end + len]);
         Self {
+            kind,
             end,
-            len,
-            columns: column_after(after, &bytes[end..end + len]) - after,
-            after,
+            content,
+            content_column,
         }
     }
+}
 
-    /// The content start's column: past one to four columns of blanks, else past one.
-    pub(crate) fn content_column(&self) -> usize {
-        self.after
-            + if (1..=4).contains(&self.columns) {
-                self.columns
-            } else {
-                1
-            }
+impl Content {
+    /// The content after a marker ending at column `after`, `blanks` its first blanks at byte
+    /// `at`, and the column it starts at.
+    pub(crate) fn read(after: usize, at: usize, blanks: &[u8]) -> (Self, usize) {
+        match column_after(after, blanks) - after {
+            0 => (Self::Empty, after + 1),
+            columns @ 1..=4 => (Self::Blanks(at..at + blanks.len()), after + columns),
+            _ => (Self::Indented, after + 1),
+        }
     }
 }
 

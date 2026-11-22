@@ -5,7 +5,7 @@ use std::vec;
 
 use inkra_text::{ByteOffset, Hunk};
 
-use crate::items::MarkerBlanks;
+use crate::items::{Content, Marker};
 use crate::parse::line_start_prefix;
 use crate::spans::{last_before, line_ranges, line_start};
 use crate::structure::{Fallback, Structure};
@@ -146,11 +146,11 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
 /// what goes before it: the content start (D6). Its blanks count in columns from the line's start;
 /// one to four go before it, of five or more only one, and an empty item gains a space of its own.
 fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) {
-    let blanks = MarkerBlanks::at(text, line, marker);
-    match blanks.columns {
-        0 => (blanks.end, " "),
-        1..=4 => (blanks.end + blanks.len, ""),
-        _ => (blanks.end + 1, ""),
+    let marker = Marker::at(text, line, marker);
+    match marker.content {
+        Content::Empty => (marker.end, " "),
+        Content::Blanks(blanks) => (blanks.end, ""),
+        Content::Indented => (marker.end + 1, ""),
     }
 }
 

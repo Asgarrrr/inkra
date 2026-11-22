@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
 
-use crate::items::{MarkerBlanks, column_after};
+use crate::items::{Marker, column_after};
 use crate::spans::{last_before, line_end, line_ranges, line_start, to_offsets};
 use crate::{Gutter, Markdown};
 
@@ -183,7 +183,7 @@ fn is_gutter_item(text: &str, markdown: &Markdown, at: usize) -> bool {
 /// The column where item `at`'s content starts on its marker line (`CommonMark` 5.2).
 fn content_column(text: &str, markdown: &Markdown, at: usize) -> usize {
     let marker = markdown.structure.items[at].marker.get();
-    MarkerBlanks::at(text, line_start(text, marker), marker).content_column()
+    Marker::at(text, line_start(text, marker), marker).content_column
 }
 
 /// What follows a `\n` that starts a line in the quotes of the line at `line`: its `>`s, then
