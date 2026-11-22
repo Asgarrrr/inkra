@@ -645,8 +645,9 @@ job (`items.rs:285-290`).
 - D7: `9.` to `10.` with a held line and a child list, by renumbering, by `⇧⇥` and by `↩`; `10.` to
   `-` under `⇧⇥`.
 - D8: `- p\n  - |`, `- p\n  * |`, `1. a\n   1. |` and `para\n- |` under `↩`, `⇧⇥`, `⌫` and `⇥`.
-- No list command parses the note: a thread-local pass counter, as `cycle.rs` keeps
-  (`cycle.rs:242-251`), allows one fallback pass per command at most.
+- No list command parses the note: `FALLBACKS`, the thread-local pass counter `Fallback::read`
+  keeps for `⌘L` and the list commands alike (`structure.rs`), allows one fallback pass per command
+  at most.
 
 Proptests over generated notes: lists of bullets, numbers up to three digits, tasks, quotes, tabs in
 the indent, held lines, lazy lines and code blocks in items, nesting up to four:

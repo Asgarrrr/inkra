@@ -127,6 +127,8 @@ pub(crate) struct Fallback {
 impl Fallback {
     /// The pass over `line` from `from`; `None` when it opens no item.
     pub(crate) fn read(text: &str, line: &Range<usize>, from: usize) -> Option<Self> {
+        #[cfg(test)]
+        FALLBACKS.set(FALLBACKS.get() + 1);
         let pad = column_after(0, &text.as_bytes()[line.start..from]) % 4;
         let piece = format!("{:pad$}{}\n", "", &text[from..line.end]);
         let marker = innermost_item(&piece)?;
@@ -165,6 +167,12 @@ fn close(open: &mut Vec<(u32, usize)>, at: usize) {
     while open.last().is_some_and(|&(_, end)| end <= at) {
         open.pop();
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The fallback passes run, for the tests that bound them to one per command.
+    pub(crate) static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

@@ -2,8 +2,9 @@
 
 use inkra_text::{ByteOffset, Hunk};
 
-use super::{FALLBACKS, continue_list};
+use super::continue_list;
 use crate::parse;
+use crate::structure::FALLBACKS;
 
 pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
     let mut out = text.to_owned();

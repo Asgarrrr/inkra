@@ -157,8 +157,6 @@ fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) 
 /// Where the innermost item pulldown-cmark reads on `line` alone, past its prefix of `lead` bytes,
 /// puts a checkbox (D6).
 fn fallback(text: &str, line: &Range<usize>, lead: usize) -> Option<(usize, &'static str)> {
-    #[cfg(test)]
-    counted(&FALLBACKS);
     let fallback = Fallback::read(text, line, line.start + lead)?;
     let (at, before) = checkbox_at(&fallback.piece, 0, fallback.marker);
     Some((fallback.in_text(at), before))
@@ -183,7 +181,7 @@ fn landed(text: &str, before: &Structure, cycled: &[Cycled], checked: bool) -> V
     }
     spliced.push_str(&text[copied..]);
     #[cfg(test)]
-    counted(&PARSES);
+    PARSES.set(PARSES.get() + 1);
     let parsed = parse(&spliced);
     // A splice lies inside its line, so a line moves by the growth of the splices before it.
     let mut shift = 0;
@@ -234,14 +232,8 @@ fn moved<'a>(
 }
 
 #[cfg(test)]
-fn counted(passes: &'static std::thread::LocalKey<std::cell::Cell<usize>>) {
-    passes.set(passes.get() + 1);
-}
-
-#[cfg(test)]
 thread_local! {
     static PARSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-    static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

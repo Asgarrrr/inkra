@@ -97,8 +97,6 @@ fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<us
     }) {
         return None;
     }
-    #[cfg(test)]
-    FALLBACKS.set(FALLBACKS.get() + 1);
     let fallback = Fallback::read(text, &line.range, line.lead_end(text))?;
     let piece = &fallback.piece;
     let end = marker_end(piece, fallback.marker);
@@ -296,11 +294,6 @@ fn split(
 /// The empty item's line past its quote part, deleted: the list ends there (D3).
 fn leave(line: &Line<'_>) -> ListEdit {
     ListEdit::replace(line.quote_end()..line.range.end, String::new())
-}
-
-#[cfg(test)]
-thread_local! {
-    pub(super) static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]

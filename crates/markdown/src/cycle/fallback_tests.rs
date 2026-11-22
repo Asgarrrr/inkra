@@ -4,8 +4,9 @@
 use inkra_text::ByteOffset;
 
 use super::tests::apply;
-use super::{FALLBACKS, PARSES, cycle_tasks};
+use super::{PARSES, cycle_tasks};
 use crate::parse;
+use crate::structure::FALLBACKS;
 
 fn selected(text: &str, start: usize, end: usize) -> String {
     let range = ByteOffset::new(start)..ByteOffset::new(end);
