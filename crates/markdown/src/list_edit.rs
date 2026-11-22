@@ -201,7 +201,7 @@ fn container_prefix(text: &str, markdown: &Markdown, line: usize, column: usize)
         .iter()
         .rev()
         .find(|gutter| gutter.quotes.len() >= depth);
-    if let Some(source) = source.filter(|_| depth > 0) {
+    if let Some(source) = source {
         let mut from = source.range.start.get();
         for quote in &source.quotes[..depth] {
             prefix.push_str(&text[from..quote.get()]);
