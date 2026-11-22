@@ -300,7 +300,7 @@ pub(crate) struct MarkerBlanks {
     /// Their columns.
     pub(crate) columns: usize,
     /// The marker end's column, counted from the line's start.
-    pub(crate) after: usize,
+    after: usize,
 }
 
 impl MarkerBlanks {
