@@ -241,8 +241,7 @@ fn continuation(line: &Line<'_>, at: usize, step: u64) -> Continuation {
         Content::Blanks(blanks) => &text[blanks.clone()],
         Content::Empty | Content::Indented => " ",
     };
-    let after = column_after(0, out.as_bytes());
-    let (_, content_column) = Content::read(after, out.len(), blanks.as_bytes());
+    let content_column = Content::column(column_after(0, out.as_bytes()), blanks.as_bytes());
     out.push_str(blanks);
     let task = line
         .gutter

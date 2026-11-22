@@ -341,7 +341,9 @@ impl Marker {
             .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
             .count();
         let after = column_after(0, &bytes[line..end]);
-        let (content, content_column) = Content::read(after, end, &bytes[end..end + len]);
+        let blanks = &bytes[end..end + len];
+        let content = Content::read(after, end, blanks);
+        let content_column = Content::column(after, blanks);
         Self {
             kind,
             end,
@@ -353,12 +355,21 @@ impl Marker {
 
 impl Content {
     /// The content after a marker ending at column `after`, `blanks` its first blanks at byte
-    /// `at`, and the column it starts at.
-    pub(crate) fn read(after: usize, at: usize, blanks: &[u8]) -> (Self, usize) {
+    /// `at`.
+    fn read(after: usize, at: usize, blanks: &[u8]) -> Self {
         match column_after(after, blanks) - after {
-            0 => (Self::Empty, after + 1),
-            columns @ 1..=4 => (Self::Blanks(at..at + blanks.len()), after + columns),
-            _ => (Self::Indented, after + 1),
+            0 => Self::Empty,
+            1..=4 => Self::Blanks(at..at + blanks.len()),
+            _ => Self::Indented,
+        }
+    }
+
+    /// The column the content starts at after a marker ending at column `after`, `blanks` its
+    /// first blanks: past one to four columns of them, else one column past the marker.
+    pub(crate) fn column(after: usize, blanks: &[u8]) -> usize {
+        match column_after(after, blanks) - after {
+            columns @ 1..=4 => after + columns,
+            _ => after + 1,
         }
     }
 }
