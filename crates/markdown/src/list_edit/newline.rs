@@ -2,6 +2,7 @@
 //! D3, D8).
 
 use std::iter;
+use std::num::NonZeroUsize;
 use std::ops::Range;
 
 use inkra_text::ByteOffset;
@@ -147,31 +148,24 @@ fn continued(line: &Line<'_>, item: usize, cut: Range<usize>) -> ListEdit {
     let cut = cut.start..cut.end + blanks(&line.doc.text[cut.end..line.range.end]);
     let sibling = continuation(line, item, 1);
     let column = sibling.content_column;
-    let shift = column.saturating_sub(line.doc.content_column(item));
+    let shift = NonZeroUsize::new(column.saturating_sub(line.doc.content_column(item)));
     let mut held = held(line, item);
     let first = held.next();
     // An item begins with one blank line at most, so an empty new one goes past them.
-    let past_blanks = first
+    let landing = first
         .as_ref()
-        .map(|held| held.range.start - 1)
-        .filter(|&at| empty && at > line.range.end);
-    let inserted = format!("\n{}", sibling.line);
-    let (mut hunks, landing) = match past_blanks {
-        Some(at) => {
-            let gone = (!cut.is_empty()).then(|| hunk(cut, String::new()));
-            (
-                gone.into_iter().chain([hunk(at..at, inserted)]).collect(),
-                at,
-            )
-        }
-        None => (vec![hunk(cut.clone(), inserted)], cut.end),
-    };
+        .filter(|_| empty)
+        .map_or(cut.end, |held| held.range.start - 1);
+    let gone = (!cut.is_empty()).then(|| hunk(cut, String::new()));
+    let inserted = hunk(landing..landing, format!("\n{}", sibling.line));
+    let mut hunks: Vec<_> = gone.into_iter().chain([inserted]).collect();
     // An empty new line opens no paragraph for a lazy line right below to continue.
     let lazy = |held: &Line<'_>| held.lazy_prefix(column).filter(|_| empty);
-    hunks.extend(first.and_then(|held| lazy(&held).or_else(|| shifted(&held, shift))));
+    let moved = first.and_then(|held| lazy(&held).or_else(|| shift.map(|by| shifted(&held, by))));
+    hunks.extend(moved);
     // Only a shift moves the lines past the first, so only a shift reads them (D7).
-    if shift > 0 {
-        hunks.extend(held.filter_map(|held| shifted(&held, shift)));
+    if let Some(by) = shift {
+        hunks.extend(held.map(|held| shifted(&held, by)));
     }
     ListEdit::new(hunks, landing)
 }

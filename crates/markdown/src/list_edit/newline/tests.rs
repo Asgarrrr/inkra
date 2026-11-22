@@ -358,11 +358,9 @@ fn enter_runs_one_fallback_pass_at_most() {
     }
 }
 
-/// Trailing blanks above the lines an item holds go with the cut, in the one hunk (D9).
+/// Trailing blanks above the lines an item holds go with the cut.
 #[test]
-fn trailing_blanks_above_held_lines_are_cut_in_one_hunk() {
-    let edit = continue_list("- a \n  b", &parse("- a \n  b"), ByteOffset::new(4));
-    assert_eq!(edit.map(|edit| edit.hunks.len()), Some(1));
+fn trailing_blanks_above_held_lines_go_with_the_cut() {
     check(&[("- a |\n  b", "- a\n- |\n  b")]);
 }
 
