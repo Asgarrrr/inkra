@@ -62,6 +62,7 @@ impl Collector {
                 let marker = marker_start(text, range.start);
                 close(&mut self.items, marker);
                 close(&mut self.lists, marker);
+                // Every item but the last takes two bytes, so only a note past 8 GiB saturates.
                 let index = u32::try_from(self.structure.items.len()).unwrap_or(u32::MAX);
                 self.structure.items.push(Item {
                     marker: ByteOffset::new(marker),
