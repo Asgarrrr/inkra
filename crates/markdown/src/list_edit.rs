@@ -190,14 +190,12 @@ fn content_column(text: &str, markdown: &Markdown, at: usize) -> usize {
 /// spaces to `column` (D2).
 fn container_prefix(text: &str, markdown: &Markdown, line: usize, column: usize) -> String {
     let mut prefix = String::new();
+    let depth = markdown
+        .gutter_on(ByteOffset::new(line))
+        .map_or(0, |gutter| gutter.depth);
     let at = markdown
         .gutters
         .partition_point(|gutter| gutter.range.start.get() <= line);
-    let depth = at
-        .checked_sub(1)
-        .map(|at| &markdown.gutters[at])
-        .filter(|gutter| gutter.range.start.get() == line)
-        .map_or(0, |gutter| gutter.depth);
     // A lazy line shows fewer `>`; the quote's lines above it hold one that shows them all.
     let source = markdown.gutters[..at]
         .iter()
