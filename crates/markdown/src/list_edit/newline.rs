@@ -1,6 +1,7 @@
 //! `↩`: continue a list, a quote or an item's code, or leave an empty item (list editing spec, D2,
 //! D3, D8).
 
+use std::fmt::Write as _;
 use std::iter;
 use std::num::NonZeroUsize;
 use std::ops::Range;
@@ -213,29 +214,25 @@ struct Continuation {
     content_column: usize,
 }
 
-/// The marker line of a sibling of item `at`, numbered `step` past it (D2, rule 6).
-fn continuation(line: &Line<'_>, at: usize, step: u64) -> Continuation {
+/// The marker line of a sibling of item `item`, numbered `step` past it (D2, rule 6).
+fn continuation(line: &Line<'_>, item: usize, step: u64) -> Continuation {
     let Doc { text, markdown } = line.doc;
-    let at = markdown.structure.items[at].marker.get();
+    let at = markdown.structure.items[item].marker.get();
     let mut out = line.doc.container_prefix(line.range.start, line.column(at));
     let marker = Marker::at(text, line.range.start, at);
-    let number = match &marker.kind {
-        MarkerKind::Number { digits } => text[digits.clone()]
-            .parse::<u64>()
-            .ok()
-            .map(|number| (digits.clone(), (number + step).to_string())),
-        MarkerKind::Bullet => None,
-    };
-    match number {
-        Some((digits, number)) => {
-            out.extend(iter::repeat_n(
-                '0',
-                digits.len().saturating_sub(number.len()),
-            ));
-            out.push_str(&number);
+    match &marker.kind {
+        MarkerKind::Number { digits } => {
+            #[expect(
+                clippy::expect_used,
+                reason = "CommonMark caps a list number at 9 digits"
+            )]
+            let number = text[digits.clone()]
+                .parse::<u64>()
+                .expect("a list number fits u64");
+            let _ = write!(out, "{:0width$}", number + step, width = digits.len());
             out.push_str(&text[digits.end..marker.end]);
         }
-        None => out.push_str(&text[at..marker.end]),
+        MarkerKind::Bullet => out.push_str(&text[at..marker.end]),
     }
     let blanks = match &marker.content {
         Content::Blanks(blanks) => &text[blanks.clone()],
