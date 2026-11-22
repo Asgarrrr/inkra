@@ -5,10 +5,10 @@ use std::vec;
 
 use inkra_text::{ByteOffset, Hunk};
 
-use crate::items::{MarkerBlanks, column_after};
+use crate::items::MarkerBlanks;
 use crate::parse::line_start_prefix;
 use crate::spans::{last_before, line_ranges, line_start};
-use crate::structure::{Structure, innermost_item};
+use crate::structure::{Fallback, Structure};
 use crate::{Markdown, parse};
 
 /// Parses of a spliced copy per `⌘L`: the first candidates, the second ones, then the batch
@@ -155,17 +155,13 @@ fn checkbox_at(text: &str, line: usize, marker: usize) -> (usize, &'static str) 
 }
 
 /// Where the innermost item pulldown-cmark reads on `line` alone, past its prefix of `lead` bytes,
-/// puts a checkbox. The pass starts its tab stops at its text, so the text follows `c mod 4` spaces,
-/// `c` the prefix's columns: every tab stops where it does in the line, and the pad opens no code
-/// (D6).
+/// puts a checkbox (D6).
 fn fallback(text: &str, line: &Range<usize>, lead: usize) -> Option<(usize, &'static str)> {
     #[cfg(test)]
     counted(&FALLBACKS);
-    let from = line.start + lead;
-    let pad = column_after(0, &text.as_bytes()[line.start..from]) % 4;
-    let piece = format!("{:pad$}{}\n", "", &text[from..line.end]);
-    let (at, before) = checkbox_at(&piece, 0, innermost_item(&piece)?);
-    Some((from + at - pad, before))
+    let fallback = Fallback::read(text, line, line.start + lead)?;
+    let (at, before) = checkbox_at(&fallback.piece, 0, fallback.marker);
+    Some((fallback.in_text(at), before))
 }
 
 /// Whether each line's current splice, applied with all the others to one copy, leaves the line

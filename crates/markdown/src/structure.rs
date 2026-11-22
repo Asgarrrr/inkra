@@ -7,7 +7,7 @@ use inkra_text::ByteOffset;
 use pulldown_cmark::{Event, Parser, Tag};
 
 use crate::cmark::options;
-use crate::items::marker_start;
+use crate::items::{column_after, marker_start};
 use crate::parse::without_line_ending;
 use crate::spans::{line_start, to_offsets};
 
@@ -113,9 +113,41 @@ impl Collector {
     }
 }
 
+/// A line where no item opens, read alone by one pulldown-cmark pass from `from`. The pass starts
+/// its tab stops at its text, so the text follows `c mod 4` spaces, `c` the columns before it:
+/// every tab stops where it does in the line, and the pad opens no code (task boxes spec, D6).
+pub(crate) struct Fallback {
+    /// The pad, the line's text from `from`, and a newline.
+    pub(crate) piece: String,
+    /// The innermost item's marker in `piece`.
+    pub(crate) marker: usize,
+    from: usize,
+    pad: usize,
+}
+
+impl Fallback {
+    /// The pass over `line` from `from`; `None` when it opens no item.
+    pub(crate) fn read(text: &str, line: &Range<usize>, from: usize) -> Option<Self> {
+        let pad = column_after(0, &text.as_bytes()[line.start..from]) % 4;
+        let piece = format!("{:pad$}{}\n", "", &text[from..line.end]);
+        let marker = innermost_item(&piece)?;
+        Some(Self {
+            piece,
+            marker,
+            from,
+            pad,
+        })
+    }
+
+    /// `at`, an offset in `piece` past its pad, in the text.
+    pub(crate) fn in_text(&self, at: usize) -> usize {
+        self.from + at - self.pad
+    }
+}
+
 /// The marker of the innermost item one pass reads in `text`, a single line, as `parse` reads it:
 /// `text` ends with a newline.
-pub(crate) fn innermost_item(text: &str) -> Option<usize> {
+fn innermost_item(text: &str) -> Option<usize> {
     let mut collector = Collector::default();
     for (event, range) in Parser::new_ext(text, options()).into_offset_iter() {
         if let Event::Start(tag) = &event {

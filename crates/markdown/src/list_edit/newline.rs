@@ -11,7 +11,7 @@ use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hu
 use crate::Markdown;
 use crate::items::{MarkerBlanks, marker_end};
 use crate::spans::{first_from, last_before};
-use crate::structure::innermost_item;
+use crate::structure::Fallback;
 
 /// The edit `↩` makes at `caret` in `text`, as `markdown`, its parse, reads it; `None` where no
 /// list rule applies and the plain `\n` goes in. The caller gives a selection and marked text the
@@ -89,9 +89,8 @@ fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
     .is_some_and(|block| block.range.start.get() <= line.range.end)
 }
 
-/// The text start of an empty marker the fallback reads on a line where no item opens and no code
-/// lies: one pass over the line past its quote part and leading blanks, padded so its tab stops
-/// fall where the line's do (D8).
+/// The text start of an empty marker the fallback reads past the line's quote part and leading
+/// blanks, on a line where no item opens and no code lies (D8).
 fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
     // Front matter and HTML hold no markdown marker.
     let skipped = first_from(&markdown.structure.skipped, line.range.start, |range| {
@@ -102,13 +101,11 @@ fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<us
     }
     #[cfg(test)]
     FALLBACKS.set(FALLBACKS.get() + 1);
-    let from = line.lead_end(text);
-    let pad = line.column(text, from) % 4;
-    let piece = format!("{:pad$}{}\n", "", &text[from..line.range.end]);
-    let marker = innermost_item(&piece)?;
-    let end = marker_end(&piece, marker);
+    let fallback = Fallback::read(text, &line.range, line.lead_end(text))?;
+    let piece = &fallback.piece;
+    let end = marker_end(piece, fallback.marker);
     let rest = &piece[end..piece.len() - 1];
-    (blanks(rest) == rest.len()).then(|| from + end - pad + usize::from(!rest.is_empty()))
+    (blanks(rest) == rest.len()).then(|| fallback.in_text(end) + usize::from(!rest.is_empty()))
 }
 
 /// `↩` on a marker line at or past its text start (D2, rules 3, 5, 6 and 7).
