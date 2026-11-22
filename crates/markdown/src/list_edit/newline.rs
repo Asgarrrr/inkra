@@ -10,7 +10,7 @@ use super::shift::shifted;
 use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk};
 use crate::Markdown;
 use crate::items::{Content, Marker, MarkerKind, column_after, marker_end};
-use crate::spans::{first_from, last_before};
+use crate::spans::{last_before, touches};
 use crate::structure::Fallback;
 
 /// The edit `↩` makes at `caret`, or `None` for the plain `\n` (D2). A selection and marked text
@@ -54,13 +54,10 @@ pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Opti
 /// Whether an item or a quote opens on the line at or past its text start (D2, rule 10).
 fn opens_past(markdown: &Markdown, line: &Line<'_>) -> bool {
     let structure = &markdown.structure;
-    let past = ByteOffset::new(line.text_start());
-    let item = first_from(&structure.items, past, |item| item.marker).map(|item| item.marker);
-    let quote = first_from(&structure.quotes, past, |&quote| quote).copied();
-    [item, quote]
-        .into_iter()
-        .flatten()
-        .any(|at| at.get() <= line.range.end)
+    let past = line.text_start()..=line.range.end;
+    touches(&structure.items, past.clone(), |item| {
+        item.marker.get()..item.marker.get()
+    }) || touches(&structure.quotes, past, |quote| quote.get()..quote.get())
 }
 
 /// The innermost gutter item opening on the line: the last item whose marker lies in its item part.
@@ -74,28 +71,30 @@ fn caret_item(markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
 
 /// Whether a code block touches the line.
 fn in_code(markdown: &Markdown, line: &Line<'_>) -> bool {
-    first_from(&markdown.code_blocks, line.range.start, |block| {
-        block.range.end.get()
-    })
-    .is_some_and(|block| block.range.start.get() <= line.range.end)
+    touches(
+        &markdown.code_blocks,
+        line.range.start..=line.range.end,
+        |block| block.range.start.get()..block.range.end.get(),
+    )
 }
 
 /// Whether a code block opens on the line at or past its text start (D2, rule 3).
 fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
-    first_from(&markdown.code_blocks, line.text_start(), |block| {
-        block.range.start.get()
-    })
-    .is_some_and(|block| block.range.start.get() <= line.range.end)
+    touches(
+        &markdown.code_blocks,
+        line.text_start()..=line.range.end,
+        |block| block.range.start.get()..block.range.start.get(),
+    )
 }
 
 /// The text start of an empty marker the fallback reads past the line's quote part and leading
 /// blanks, on a line where no item opens and no code lies (D8).
 fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
     // Front matter and HTML hold no markdown marker.
-    let skipped = first_from(&markdown.structure.skipped, line.range.start, |range| {
-        range.end.get()
-    });
-    if skipped.is_some_and(|range| range.start.get() <= line.range.start) {
+    let lines = line.range.start..=line.range.end;
+    if touches(&markdown.structure.skipped, lines, |range| {
+        range.start.get()..range.end.get()
+    }) {
         return None;
     }
     #[cfg(test)]

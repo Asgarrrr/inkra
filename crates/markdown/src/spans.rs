@@ -1,7 +1,7 @@
 //! Byte-range primitives the event walkers share: code span bounds, line pieces, merged spans,
 //! lookups in sorted offsets.
 
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use inkra_text::ByteOffset;
 
@@ -78,6 +78,16 @@ pub(crate) fn first_from<T, K: Ord + Copy>(
     key: impl Fn(&T) -> K,
 ) -> Option<&T> {
     sorted.get(sorted.partition_point(|element| key(element) < at))
+}
+
+/// Whether an element of `sorted`, its ranges ascending and disjoint, touches `span`.
+pub(crate) fn touches<T>(
+    sorted: &[T],
+    span: RangeInclusive<usize>,
+    range: impl Fn(&T) -> Range<usize>,
+) -> bool {
+    first_from(sorted, *span.start(), |element| range(element).end)
+        .is_some_and(|element| range(element).start <= *span.end())
 }
 
 /// The index of the last element of `sorted`, ascending by `key`, whose key is below `at`.
