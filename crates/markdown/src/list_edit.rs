@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use inkra_text::{ByteOffset, Hunk};
+use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
 
 use crate::items::{MarkerBlanks, column_after};
 use crate::spans::{line_end, line_ranges, line_start, to_offsets};
@@ -21,13 +21,20 @@ pub struct ListEdit {
 }
 
 impl ListEdit {
-    /// One hunk replacing `range` with `text`, the caret at the end of its text.
-    fn replace(range: Range<usize>, text: String) -> Self {
-        let caret = ByteOffset::new(range.start + text.len());
+    /// `hunks`, the caret where they move `caret`, an offset in the text before them, as an
+    /// anchor biased right.
+    fn new(hunks: Vec<Hunk>, caret: usize) -> Self {
+        let diff = Diff::new(Version::default(), hunks);
+        let caret = diff.map(ByteOffset::new(caret), Bias::Right);
         Self {
-            hunks: vec![hunk(range, text)],
+            hunks: diff.hunks().to_vec(),
             caret,
         }
+    }
+
+    /// One hunk replacing `range` with `text`, the caret at the end of its text.
+    fn replace(range: Range<usize>, text: String) -> Self {
+        Self::new(vec![hunk(range.clone(), text)], range.end)
     }
 }
 
@@ -132,13 +139,12 @@ impl<'m> Line<'m> {
                     .is_some_and(|at| column < content_column(text, markdown, at)))
     }
 
-    /// The line below, its container prefix to `column` in place of its leading blanks when it is
-    /// lazy: a line `↩` leaves blank above it would end its paragraph (D2, rules 2, 6 and 8).
-    fn lazy_below(&self, text: &str, markdown: &Markdown, column: usize) -> Option<Hunk> {
-        let below = self.below(text, markdown).next()?;
-        below.is_lazy(text, markdown).then(|| {
-            let prefix = container_prefix(text, markdown, below.range.start, column);
-            hunk(below.range.start..below.lead_end(text), prefix)
+    /// Its container prefix to `column` in place of its leading blanks, when it is lazy: a blank
+    /// line above it would end its paragraph (D2, rules 2, 6 and 8).
+    fn lazy_prefix(&self, text: &str, markdown: &Markdown, column: usize) -> Option<Hunk> {
+        self.is_lazy(text, markdown).then(|| {
+            let prefix = container_prefix(text, markdown, self.range.start, column);
+            hunk(self.range.start..self.lead_end(text), prefix)
         })
     }
 }
