@@ -1,12 +1,17 @@
 //! A line's holder and the container prefix (list editing spec, D1, D2).
 
-use super::{container_prefix, holder};
+use super::Doc;
 use crate::parse;
 
 /// The holder's marker, for the line starting at `line`.
 fn holder_marker(text: &str, line: usize) -> Option<usize> {
     let markdown = parse(text);
-    holder(text, &markdown, line).map(|at| markdown.structure.items[at].marker.get())
+    let doc = Doc {
+        text,
+        markdown: &markdown,
+    };
+    doc.holder(line)
+        .map(|at| markdown.structure.items[at].marker.get())
 }
 
 #[test]
@@ -42,8 +47,12 @@ fn the_container_prefix_holds_the_new_line_in_its_quotes_and_items() {
         ("> a\n\n> b", 5, 0, "> "),
     ] {
         let markdown = parse(text);
+        let doc = Doc {
+            text,
+            markdown: &markdown,
+        };
         assert_eq!(
-            container_prefix(text, &markdown, line, column),
+            doc.container_prefix(line, column),
             want,
             "{text:?} at {line}"
         );

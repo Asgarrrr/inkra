@@ -7,7 +7,7 @@ use std::ops::Range;
 use inkra_text::ByteOffset;
 
 use super::shift::shifted;
-use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk};
+use super::{Doc, Line, ListEdit, blanks, hunk};
 use crate::Markdown;
 use crate::items::{Content, Marker, MarkerKind, column_after, marker_end};
 use crate::spans::{last_before, touches};
@@ -18,42 +18,42 @@ use crate::structure::Fallback;
 #[must_use]
 pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Option<ListEdit> {
     let caret = caret.get();
-    let line = Line::at(text, markdown, caret);
-    if opens_past(markdown, &line) || caret < line.text_start() {
+    let doc = Doc { text, markdown };
+    let line = doc.line_at(caret);
+    if opens_past(&line) || caret < line.text_start() {
         return None;
     }
-    if let Some(item) = caret_item(markdown, &line) {
-        return Some(on_marker_line(text, markdown, &line, item, caret));
+    if let Some(item) = caret_item(&line) {
+        return Some(on_marker_line(&line, item, caret));
     }
-    let holder = holder(text, markdown, line.range.start);
-    if in_code(markdown, &line) {
+    let holder = doc.holder(line.range.start);
+    if in_code(&line) {
         // A code line keeps its blanks before its leaf text start.
         let gutter = line.gutter?;
-        let held = holder.map_or(0, |at| content_column(text, markdown, at));
-        let column = held.max(line.column(text, gutter.range.end.get()));
-        return Some(split(text, markdown, &line, caret, column));
+        let held = holder.map_or(0, |at| doc.content_column(at));
+        let column = held.max(line.column(gutter.range.end.get()));
+        return Some(split(&line, caret, column));
     }
     // Its line is a marker line: before its text start, the plain key (rule 9).
-    if let Some(start) = empty_fallback(text, markdown, &line) {
+    if let Some(start) = empty_fallback(&line) {
         return (caret >= start).then(|| leave(&line));
     }
     if let Some(at) = holder {
-        let column = content_column(text, markdown, at);
-        return Some(split(text, markdown, &line, caret, column));
+        return Some(split(&line, caret, doc.content_column(at)));
     }
     let gutter = line.gutter?;
     match gutter.quotes.last() {
         // An empty quote line leaves its innermost quote; a lazy line is never empty.
-        Some(&last) if gutter.quotes.len() == gutter.depth && line.is_blank(text) => {
+        Some(&last) if gutter.quotes.len() == gutter.depth && line.is_blank() => {
             Some(ListEdit::replace(last.get()..line.range.end, String::new()))
         }
-        _ => Some(split(text, markdown, &line, caret, 0)),
+        _ => Some(split(&line, caret, 0)),
     }
 }
 
 /// Whether an item or a quote opens on the line at or past its text start (D2, rule 10).
-fn opens_past(markdown: &Markdown, line: &Line<'_>) -> bool {
-    let structure = &markdown.structure;
+fn opens_past(line: &Line<'_>) -> bool {
+    let structure = &line.doc.markdown.structure;
     let past = line.text_start()..=line.range.end;
     touches(&structure.items, past.clone(), |item| {
         item.marker.get()..item.marker.get()
@@ -61,27 +61,29 @@ fn opens_past(markdown: &Markdown, line: &Line<'_>) -> bool {
 }
 
 /// The innermost gutter item opening on the line: the last item whose marker lies in its item part.
-fn caret_item(markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
+fn caret_item(line: &Line<'_>) -> Option<usize> {
     let gutter = line.gutter?;
     gutter.item.as_ref().filter(|item| item.marked)?;
-    last_before(&markdown.structure.items, gutter.range.end, |item| {
-        item.marker
-    })
+    last_before(
+        &line.doc.markdown.structure.items,
+        gutter.range.end,
+        |item| item.marker,
+    )
 }
 
 /// Whether a code block touches the line.
-fn in_code(markdown: &Markdown, line: &Line<'_>) -> bool {
+fn in_code(line: &Line<'_>) -> bool {
     touches(
-        &markdown.code_blocks,
+        &line.doc.markdown.code_blocks,
         line.range.start..=line.range.end,
         |block| block.range.start.get()..block.range.end.get(),
     )
 }
 
 /// Whether a code block opens on the line at or past its text start (D2, rule 3).
-fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
+fn opens_code(line: &Line<'_>) -> bool {
     touches(
-        &markdown.code_blocks,
+        &line.doc.markdown.code_blocks,
         line.text_start()..=line.range.end,
         |block| block.range.start.get()..block.range.start.get(),
     )
@@ -89,15 +91,15 @@ fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
 
 /// The text start of an empty marker the fallback reads past the line's quote part and leading
 /// blanks, on a line where no item opens and no code lies (D8).
-fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
+fn empty_fallback(line: &Line<'_>) -> Option<usize> {
     // Front matter and HTML hold no markdown marker.
     let lines = line.range.start..=line.range.end;
-    if touches(&markdown.structure.skipped, lines, |range| {
+    if touches(&line.doc.markdown.structure.skipped, lines, |range| {
         range.start.get()..range.end.get()
     }) {
         return None;
     }
-    let fallback = Fallback::read(text, &line.range, line.lead_end(text))?;
+    let fallback = Fallback::read(line.doc.text, &line.range, line.lead_end())?;
     let piece = &fallback.piece;
     let end = marker_end(piece, fallback.marker);
     let rest = &piece[end..piece.len() - 1];
@@ -105,33 +107,27 @@ fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<us
 }
 
 /// `↩` on a marker line at or past its text start (D2, rules 3, 5, 6 and 7).
-fn on_marker_line(
-    text: &str,
-    markdown: &Markdown,
-    line: &Line<'_>,
-    item: usize,
-    caret: usize,
-) -> ListEdit {
-    let typed_end = line.typed_end(text, caret);
-    if opens_code(markdown, line) {
-        let column = content_column(text, markdown, item);
-        let prefix = container_prefix(text, markdown, line.range.start, column);
+fn on_marker_line(line: &Line<'_>, item: usize, caret: usize) -> ListEdit {
+    let doc = line.doc;
+    let typed_end = line.typed_end(caret);
+    if opens_code(line) {
+        let prefix = doc.container_prefix(line.range.start, doc.content_column(item));
         return ListEdit::replace(typed_end..caret, format!("\n{prefix}"));
     }
     let text_before = typed_end > line.text_start();
     let gesture = if text_before {
         Gesture::Continue
-    } else if !line.is_blank_past(text, caret) {
+    } else if !line.is_blank_past(caret) {
         Gesture::Above
-    } else if held(text, markdown, line, item).next().is_some() {
+    } else if held(line, item).next().is_some() {
         Gesture::Continue
     } else {
         Gesture::Leave
     };
     match gesture {
         Gesture::Leave => leave(line),
-        Gesture::Above => above(text, markdown, line, item, caret),
-        Gesture::Continue => continued(text, markdown, line, item, typed_end..caret),
+        Gesture::Above => above(line, item, caret),
+        Gesture::Continue => continued(line, item, typed_end..caret),
     }
 }
 
@@ -146,19 +142,13 @@ enum Gesture {
 }
 
 /// The next sibling, in place of `cut` and the blanks after it (D2, rule 6, D7).
-fn continued(
-    text: &str,
-    markdown: &Markdown,
-    line: &Line<'_>,
-    item: usize,
-    cut: Range<usize>,
-) -> ListEdit {
-    let empty = line.is_blank_past(text, cut.end);
-    let cut = cut.start..cut.end + blanks(&text[cut.end..line.range.end]);
-    let sibling = continuation(text, markdown, line, item, 1);
+fn continued(line: &Line<'_>, item: usize, cut: Range<usize>) -> ListEdit {
+    let empty = line.is_blank_past(cut.end);
+    let cut = cut.start..cut.end + blanks(&line.doc.text[cut.end..line.range.end]);
+    let sibling = continuation(line, item, 1);
     let column = sibling.content_column;
-    let shift = column.saturating_sub(content_column(text, markdown, item));
-    let mut held = held(text, markdown, line, item);
+    let shift = column.saturating_sub(line.doc.content_column(item));
+    let mut held = held(line, item);
     let first = held.next();
     // An item begins with one blank line at most, so an empty new one goes past them.
     let past_blanks = first
@@ -177,36 +167,31 @@ fn continued(
         None => (vec![hunk(cut.clone(), inserted)], cut.end),
     };
     // An empty new line opens no paragraph for a lazy line right below to continue.
-    let lazy = |held: &Line<'_>| held.lazy_prefix(text, markdown, column).filter(|_| empty);
-    hunks.extend(first.and_then(|held| lazy(&held).or_else(|| shifted(&held, text, shift))));
+    let lazy = |held: &Line<'_>| held.lazy_prefix(column).filter(|_| empty);
+    hunks.extend(first.and_then(|held| lazy(&held).or_else(|| shifted(&held, shift))));
     // Only a shift moves the lines past the first, so only a shift reads them (D7).
     if shift > 0 {
-        hunks.extend(held.filter_map(|held| shifted(&held, text, shift)));
+        hunks.extend(held.filter_map(|held| shifted(&held, shift)));
     }
     ListEdit::new(hunks, landing)
 }
 
 /// The lines item `item` holds below `line`, blank ones left out.
-fn held<'t, 'm>(
-    text: &'t str,
-    markdown: &'m Markdown,
-    line: &Line<'m>,
-    item: usize,
-) -> impl Iterator<Item = Line<'m>> + use<'t, 'm> {
-    let end = markdown.structure.items[item].end.get();
-    line.below(text, markdown)
+fn held<'a>(line: &Line<'a>, item: usize) -> impl Iterator<Item = Line<'a>> + use<'a> {
+    let end = line.doc.markdown.structure.items[item].end.get();
+    line.below()
         .take_while(move |held| held.range.start < end)
-        .filter(|held| !held.is_blank(text))
+        .filter(|held| !held.is_blank())
 }
 
 /// `↩` at the text start of an item with text: an empty sibling above it, or a blank line above
 /// the first item of a list, where an empty item cannot interrupt a paragraph (D2, rule 7).
-fn above(text: &str, markdown: &Markdown, line: &Line<'_>, item: usize, caret: usize) -> ListEdit {
+fn above(line: &Line<'_>, item: usize, caret: usize) -> ListEdit {
     let start = line.range.start;
-    let inserted = if has_previous_sibling(markdown, item) {
-        format!("{}\n", continuation(text, markdown, line, item, 0).line)
+    let inserted = if has_previous_sibling(line.doc.markdown, item) {
+        format!("{}\n", continuation(line, item, 0).line)
     } else {
-        format!("{}\n", &text[start..line.trimmed_quote_end(text)])
+        format!("{}\n", &line.doc.text[start..line.trimmed_quote_end()])
     };
     ListEdit::new(vec![hunk(start..start, inserted)], caret)
 }
@@ -235,15 +220,10 @@ struct Continuation {
 }
 
 /// The marker line of a sibling of item `at`, numbered `step` past it (D2, rule 6).
-fn continuation(
-    text: &str,
-    markdown: &Markdown,
-    line: &Line<'_>,
-    at: usize,
-    step: u64,
-) -> Continuation {
+fn continuation(line: &Line<'_>, at: usize, step: u64) -> Continuation {
+    let Doc { text, markdown } = line.doc;
     let at = markdown.structure.items[at].marker.get();
-    let mut out = container_prefix(text, markdown, line.range.start, line.column(text, at));
+    let mut out = line.doc.container_prefix(line.range.start, line.column(at));
     let marker = Marker::at(text, line.range.start, at);
     let number = match &marker.kind {
         MarkerKind::Number { digits } => text[digits.clone()]
@@ -285,27 +265,22 @@ fn continuation(
 
 /// `\n` and the container prefix to `column`, in place of the blanks before `caret` (D2, rules 2
 /// and 8).
-fn split(
-    text: &str,
-    markdown: &Markdown,
-    line: &Line<'_>,
-    caret: usize,
-    column: usize,
-) -> ListEdit {
-    let typed_end = line.typed_end(text, caret);
-    let prefix = container_prefix(text, markdown, line.range.start, column);
+fn split(line: &Line<'_>, caret: usize, column: usize) -> ListEdit {
+    let doc = line.doc;
+    let typed_end = line.typed_end(caret);
+    let prefix = doc.container_prefix(line.range.start, column);
     // Not the line's own quote part, as `above` copies: a lazy line shows fewer `>` than it is in.
     let (start, left) = if typed_end == line.text_start() {
-        let quote = container_prefix(text, markdown, line.range.start, 0);
+        let quote = doc.container_prefix(line.range.start, 0);
         (line.range.start, quote.trim_end().to_owned())
     } else {
         (typed_end, String::new())
     };
     let lazy = line
-        .below(text, markdown)
+        .below()
         .next()
-        .filter(|_| line.is_blank_past(text, caret))
-        .and_then(|below| below.lazy_prefix(text, markdown, column));
+        .filter(|_| line.is_blank_past(caret))
+        .and_then(|below| below.lazy_prefix(column));
     let hunks = iter::once(hunk(start..caret, format!("{left}\n{prefix}")));
     ListEdit::new(hunks.chain(lazy).collect(), caret)
 }

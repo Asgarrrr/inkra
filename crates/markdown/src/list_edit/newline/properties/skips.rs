@@ -4,7 +4,7 @@
 use inkra_text::ByteOffset;
 
 use crate::Markdown;
-use crate::list_edit::holder;
+use crate::list_edit::Doc;
 use crate::spans::{line_end, line_start};
 
 /// Whether the edit leaves a blank line right under an empty marker line, which then ends that item
@@ -58,6 +58,6 @@ pub(super) fn unheld_quoted_code(text: &str, markdown: &Markdown, caret: usize) 
         line_start(text, block.range.start.get()) <= line && line <= block.range.end.get()
     });
     coded
-        && holder(text, markdown, line).is_none()
+        && Doc { text, markdown }.holder(line).is_none()
         && markdown.gutter_on(ByteOffset::new(line)).is_some()
 }
