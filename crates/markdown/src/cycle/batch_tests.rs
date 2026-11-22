@@ -7,8 +7,9 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 
 use super::cycle_tasks;
-use super::tests::{apply, free_line, in_block, keeps_markup, task_at, task_markers};
+use super::tests::{free_line, in_block, keeps_markup, task_at, task_markers};
 use crate::parse;
+use crate::testing::apply;
 
 fn at(offset: usize) -> ByteOffset {
     ByteOffset::new(offset)

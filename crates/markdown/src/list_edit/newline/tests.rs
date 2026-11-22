@@ -1,18 +1,11 @@
 //! `↩` per rule, each case written `text` with `|` for the caret (list editing spec, D2, D3, D8).
 
-use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
+use inkra_text::{Bias, ByteOffset, Diff, Version};
 
 use super::continue_list;
 use crate::structure::FALLBACKS;
+use crate::testing::apply;
 use crate::{ListEdit, parse};
-
-pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
-    let mut out = text.to_owned();
-    for hunk in hunks.iter().rev() {
-        out.replace_range(hunk.range.start.get()..hunk.range.end.get(), &hunk.text);
-    }
-    out
-}
 
 /// `text` with `edit` applied, and where its caret lands in it.
 pub(super) fn edited(text: &str, edit: &ListEdit) -> (String, usize) {

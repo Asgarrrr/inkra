@@ -14,6 +14,8 @@ mod reveal;
 mod spans;
 mod structure;
 mod styles;
+#[cfg(test)]
+mod testing;
 
 pub use changed::changed;
 pub use content_lines::content_lines;

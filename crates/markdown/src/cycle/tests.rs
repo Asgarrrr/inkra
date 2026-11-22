@@ -7,14 +7,7 @@ use super::cycle_tasks;
 use crate::cmark::options;
 use crate::parse;
 use crate::spans::line_start;
-
-pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
-    let mut out = text.to_owned();
-    for hunk in hunks.iter().rev() {
-        out.replace_range(hunk.range.start.get()..hunk.range.end.get(), &hunk.text);
-    }
-    out
-}
+use crate::testing::apply;
 
 /// `text` after `⌘L` with the caret at `caret`.
 fn cycled(text: &str, caret: usize) -> String {

@@ -7,7 +7,7 @@ mod skips;
 
 use std::ops::Range;
 
-use inkra_text::{ByteOffset, Hunk};
+use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
 use proptest::prelude::*;
 
 use super::continue_list;
@@ -29,13 +29,10 @@ fn inserted_newlines(hunks: &[Hunk]) -> Vec<usize> {
     out
 }
 
-/// Where `at` lands once `hunks` apply: past a hunk that ends at or before it.
-fn shifted(hunks: &[Hunk], at: usize) -> usize {
-    let mut out = at;
-    for hunk in hunks.iter().filter(|hunk| hunk.range.end.get() <= at) {
-        out = out + hunk.text.len() - (hunk.range.end - hunk.range.start);
-    }
-    out
+/// Where `at` lands once `edit` applies.
+fn landing(edit: &ListEdit, at: usize) -> usize {
+    let diff = Diff::new(Version::default(), edit.hunks.clone());
+    diff.map(ByteOffset::new(at), Bias::Right).get()
 }
 
 /// The caret's line is a marker line, the caret at its end right past text (D2, rule 6).
@@ -94,10 +91,7 @@ fn intended_structure(
         quotes.iter().filter(|quote| quote.contains(&at)).count()
     };
     for quote in old_quotes.iter().filter(|quote| !deleted(quote.start)) {
-        let (to, nesting) = (
-            shifted(&edit.hunks, quote.start),
-            level(&old_quotes, quote.start),
-        );
+        let (to, nesting) = (landing(edit, quote.start), level(&old_quotes, quote.start));
         prop_assert!(
             new_quotes
                 .iter()
@@ -209,7 +203,7 @@ fn check(text: &str, caret: usize) -> Result<(), TestCaseError> {
             && !text[start..end].trim_matches([' ', '\t', '>']).is_empty()
             && !touched
         {
-            let to = line_start(&new, shifted(&edit.hunks, start));
+            let to = line_start(&new, landing(&edit, start));
             prop_assert_eq!(
                 containers(&new, to),
                 containers(text, start),
