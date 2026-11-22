@@ -294,7 +294,7 @@ fn split(
 ) -> ListEdit {
     let typed_end = line.typed_end(text, caret);
     let prefix = container_prefix(text, markdown, line.range.start, column);
-    // A line left with no text keeps its quote part as the prefix writes it, so a lazy one too.
+    // Not the line's own quote part, as `above` copies: a lazy line shows fewer `>` than it is in.
     let (start, left) = if typed_end == line.text_start() {
         let quote = container_prefix(text, markdown, line.range.start, 0);
         (line.range.start, quote.trim_end().to_owned())

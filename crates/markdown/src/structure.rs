@@ -45,14 +45,20 @@ impl Item {
     }
 }
 
+/// An item or a list the walk is inside: its index, and its range's end.
+struct Open {
+    index: u32,
+    end: usize,
+}
+
 /// Fills a `Structure` from the parse's events, one call per element it opens.
 #[derive(Default)]
 pub(crate) struct Collector {
     structure: Structure,
-    /// Each open item's index and range end, innermost last.
-    items: Vec<(u32, usize)>,
-    /// Each open list's index and range end, innermost last.
-    lists: Vec<(u32, usize)>,
+    /// The open items, innermost last.
+    items: Vec<Open>,
+    /// The open lists, innermost last.
+    lists: Vec<Open>,
     /// The lists opened so far.
     opened: u32,
 }
@@ -63,7 +69,10 @@ impl Collector {
             // A range can start on the line before; its marker cannot.
             Tag::List(_) => {
                 close(&mut self.lists, marker_start(text, range.start));
-                self.lists.push((self.opened, range.end));
+                self.lists.push(Open {
+                    index: self.opened,
+                    end: range.end,
+                });
                 self.opened += 1;
             }
             Tag::Item => {
@@ -79,10 +88,13 @@ impl Collector {
                 self.structure.items.push(Item {
                     marker: ByteOffset::new(marker),
                     end: ByteOffset::new(without_line_ending(text, range).end),
-                    parent: self.items.last().map(|&(parent, _)| parent),
-                    list: self.lists.last().map_or(0, |&(list, _)| list),
+                    parent: self.items.last().map(|open| open.index),
+                    list: self.lists.last().map_or(0, |open| open.index),
                 });
-                self.items.push((index, range.end));
+                self.items.push(Open {
+                    index,
+                    end: range.end,
+                });
             }
             Tag::BlockQuote(_) => {
                 self.structure.quotes.push(ByteOffset::new(range.start));
@@ -175,8 +187,8 @@ fn innermost_item(text: &str) -> Option<usize> {
 }
 
 /// Drops the open elements that end at or before `at`.
-fn close(open: &mut Vec<(u32, usize)>, at: usize) {
-    while open.last().is_some_and(|&(_, end)| end <= at) {
+fn close(open: &mut Vec<Open>, at: usize) {
+    while open.last().is_some_and(|open| open.end <= at) {
         open.pop();
     }
 }

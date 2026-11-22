@@ -130,12 +130,12 @@ impl<'m> Line<'m> {
         let marked = gutter
             .and_then(|gutter| gutter.item.as_ref())
             .is_some_and(|item| item.marked);
-        let column = self.column(text, self.lead_end(text));
         !marked
             && !self.is_blank(text)
             && (gutter.is_some_and(|gutter| gutter.quotes.len() < gutter.depth)
-                || holder(text, markdown, self.range.start)
-                    .is_some_and(|at| column < content_column(text, markdown, at)))
+                || holder(text, markdown, self.range.start).is_some_and(|at| {
+                    self.column(text, self.lead_end(text)) < content_column(text, markdown, at)
+                }))
     }
 
     /// Its container prefix to `column` in place of its leading blanks, when it is lazy, which a
