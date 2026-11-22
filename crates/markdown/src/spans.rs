@@ -1,4 +1,5 @@
-//! Byte-range primitives the event walkers share: code span bounds, line pieces, merged spans.
+//! Byte-range primitives the event walkers share: code span bounds, line pieces, merged spans,
+//! lookups in sorted offsets.
 
 use std::ops::Range;
 
@@ -68,4 +69,24 @@ pub(crate) fn line_ranges(text: &str, from: usize) -> impl Iterator<Item = Range
 
 pub(crate) fn to_offsets(range: Range<usize>) -> Range<ByteOffset> {
     ByteOffset::new(range.start)..ByteOffset::new(range.end)
+}
+
+/// The first element of `sorted`, ascending by `key`, whose key is at least `at`.
+pub(crate) fn first_from<T, K: Ord + Copy>(
+    sorted: &[T],
+    at: K,
+    key: impl Fn(&T) -> K,
+) -> Option<&T> {
+    sorted.get(sorted.partition_point(|element| key(element) < at))
+}
+
+/// The index of the last element of `sorted`, ascending by `key`, whose key is below `at`.
+pub(crate) fn last_before<T, K: Ord + Copy>(
+    sorted: &[T],
+    at: K,
+    key: impl Fn(&T) -> K,
+) -> Option<usize> {
+    sorted
+        .partition_point(|element| key(element) < at)
+        .checked_sub(1)
 }

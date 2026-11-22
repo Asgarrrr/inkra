@@ -7,7 +7,7 @@ use inkra_text::{ByteOffset, Hunk};
 
 use crate::items::{MarkerBlanks, column_after};
 use crate::parse::line_start_prefix;
-use crate::spans::{line_ranges, line_start};
+use crate::spans::{last_before, line_ranges, line_start};
 use crate::structure::{Structure, innermost_item};
 use crate::{Markdown, parse};
 
@@ -118,9 +118,8 @@ fn candidates(text: &str, markdown: &Markdown, line: Range<usize>, checked: bool
     }
     let checkbox = if checked { "[x] " } else { "[ ] " };
     let items = &markdown.structure.items;
-    let innermost = items[..items.partition_point(|item| item.marker.get() < line.end)]
-        .last()
-        .map(|item| item.marker.get())
+    let innermost = last_before(items, line.end, |item| item.marker.get())
+        .map(|at| items[at].marker.get())
         .filter(|&marker| marker >= line.start);
     let splices: Vec<(usize, &str)> = if let Some(marker) = innermost {
         vec![checkbox_at(text, line.start, marker)]

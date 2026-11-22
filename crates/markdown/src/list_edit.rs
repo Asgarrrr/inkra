@@ -6,7 +6,7 @@ use std::ops::Range;
 use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
 
 use crate::items::{MarkerBlanks, column_after};
-use crate::spans::{line_end, line_ranges, line_start, to_offsets};
+use crate::spans::{last_before, line_end, line_ranges, line_start, to_offsets};
 use crate::{Gutter, Markdown};
 
 pub use newline::continue_list;
@@ -162,9 +162,7 @@ fn blanks(text: &str) -> usize {
 /// before it, walked up through its parents until a gutter item ends past it (D1).
 fn holder(text: &str, markdown: &Markdown, line: usize) -> Option<usize> {
     let items = &markdown.structure.items;
-    let mut at = items
-        .partition_point(|item| item.marker.get() < line)
-        .checked_sub(1)?;
+    let mut at = last_before(items, line, |item| item.marker.get())?;
     loop {
         if items[at].end.get() > line && is_gutter_item(text, markdown, at) {
             return Some(at);

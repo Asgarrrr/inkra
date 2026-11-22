@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use inkra_text::{Bias, ByteOffset, Hunk};
 
-use crate::spans::{line_ranges, line_start, push, to_offsets};
+use crate::spans::{first_from, line_ranges, line_start, push, to_offsets};
 use crate::{Conceal, Markdown, Span, Styles};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,11 +112,7 @@ impl Markdown {
 
     /// The gutter of the line starting at `line_start`.
     pub(crate) fn gutter_on(&self, line_start: ByteOffset) -> Option<&Gutter> {
-        let at = self
-            .gutters
-            .partition_point(|gutter| gutter.range.start < line_start);
-        self.gutters
-            .get(at)
+        first_from(&self.gutters, line_start, |gutter| gutter.range.start)
             .filter(|gutter| gutter.range.start == line_start)
     }
 

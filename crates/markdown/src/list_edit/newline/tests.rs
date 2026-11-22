@@ -362,7 +362,11 @@ fn a_continuation_with_no_shift_moves_one_line() {
     ] {
         assert_eq!(moved_lines(text, 0), 1, "{text:?}");
     }
-    assert_eq!(moved_lines("9. a\n   b\n   c", 1), 2, "a shift moves every line");
+    assert_eq!(
+        moved_lines("9. a\n   b\n   c", 1),
+        2,
+        "a shift moves every line"
+    );
 }
 
 /// No `↩` parses the note; the fallback reads the caret's line once at most.

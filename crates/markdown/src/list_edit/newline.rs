@@ -10,6 +10,7 @@ use super::shift::shifted;
 use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk};
 use crate::Markdown;
 use crate::items::{MarkerBlanks, marker_end};
+use crate::spans::{first_from, last_before};
 use crate::structure::innermost_item;
 
 /// The edit `↩` makes at `caret` in `text`, as `markdown`, its parse, reads it; `None` where no
@@ -53,49 +54,39 @@ pub fn continue_list(text: &str, markdown: &Markdown, caret: ByteOffset) -> Opti
 
 /// Whether an item or a quote opens on the line at or past its text start (D2, rule 10).
 fn opens_past(markdown: &Markdown, line: &Line<'_>) -> bool {
-    let past = line.text_start()..=line.range.end;
     let structure = &markdown.structure;
-    let item = structure
-        .items
-        .partition_point(|item| item.marker.get() < *past.start());
-    let quote = structure
-        .quotes
-        .partition_point(|quote| quote.get() < *past.start());
-    structure
-        .items
-        .get(item)
-        .is_some_and(|item| past.contains(&item.marker.get()))
-        || structure
-            .quotes
-            .get(quote)
-            .is_some_and(|quote| past.contains(&quote.get()))
+    let past = ByteOffset::new(line.text_start());
+    let item = first_from(&structure.items, past, |item| item.marker).map(|item| item.marker);
+    let quote = first_from(&structure.quotes, past, |&quote| quote).copied();
+    [item, quote]
+        .into_iter()
+        .flatten()
+        .any(|at| at.get() <= line.range.end)
 }
 
 /// The innermost gutter item opening on the line: the last item whose marker lies in its item part.
 fn caret_item(markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
     let gutter = line.gutter?;
     gutter.item.as_ref().filter(|item| item.marked)?;
-    let items = &markdown.structure.items;
-    items
-        .partition_point(|item| item.marker < gutter.range.end)
-        .checked_sub(1)
+    last_before(&markdown.structure.items, gutter.range.end, |item| {
+        item.marker
+    })
 }
 
 /// Whether a code block touches the line.
 fn in_code(markdown: &Markdown, line: &Line<'_>) -> bool {
-    let blocks = &markdown.code_blocks;
-    let at = blocks.partition_point(|block| block.range.start.get() <= line.range.end);
-    at.checked_sub(1)
-        .is_some_and(|at| blocks[at].range.end.get() >= line.range.start)
+    first_from(&markdown.code_blocks, line.range.start, |block| {
+        block.range.end.get()
+    })
+    .is_some_and(|block| block.range.start.get() <= line.range.end)
 }
 
 /// Whether a code block opens on the line at or past its text start (D2, rule 3).
 fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
-    let blocks = &markdown.code_blocks;
-    let at = blocks.partition_point(|block| block.range.start.get() < line.text_start());
-    blocks
-        .get(at)
-        .is_some_and(|block| block.range.start.get() <= line.range.end)
+    first_from(&markdown.code_blocks, line.text_start(), |block| {
+        block.range.start.get()
+    })
+    .is_some_and(|block| block.range.start.get() <= line.range.end)
 }
 
 /// The text start of an empty marker the fallback reads on a line where no item opens and no code
@@ -103,12 +94,10 @@ fn opens_code(markdown: &Markdown, line: &Line<'_>) -> bool {
 /// fall where the line's do (D8).
 fn empty_fallback(text: &str, markdown: &Markdown, line: &Line<'_>) -> Option<usize> {
     // Front matter and HTML hold no markdown marker.
-    let skipped = &markdown.structure.skipped;
-    let at = skipped.partition_point(|range| range.end.get() < line.range.start);
-    if skipped
-        .get(at)
-        .is_some_and(|range| range.start.get() <= line.range.start)
-    {
+    let skipped = first_from(&markdown.structure.skipped, line.range.start, |range| {
+        range.end.get()
+    });
+    if skipped.is_some_and(|range| range.start.get() <= line.range.start) {
         return None;
     }
     #[cfg(test)]
@@ -169,7 +158,10 @@ fn continued(
     let (mut hunks, landing) = match past_blanks {
         Some(at) => {
             let gone = (!cut.is_empty()).then(|| hunk(cut, String::new()));
-            (gone.into_iter().chain([hunk(at..at, inserted)]).collect(), at)
+            (
+                gone.into_iter().chain([hunk(at..at, inserted)]).collect(),
+                at,
+            )
         }
         None => (vec![hunk(cut.clone(), inserted)], cut.end),
     };
