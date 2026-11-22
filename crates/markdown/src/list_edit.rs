@@ -3,7 +3,7 @@
 
 use std::ops::Range;
 
-use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
+use inkra_text::{ByteOffset, Hunk};
 
 use crate::items::{Marker, column_after};
 use crate::spans::{last_before, line_end, line_ranges, line_start, to_offsets};
@@ -16,19 +16,16 @@ pub use newline::continue_list;
 pub struct ListEdit {
     /// In order and disjoint, as `Diff::new` asserts.
     pub hunks: Vec<Hunk>,
-    /// Where the caret lands, in the edited text.
+    /// Where the caret lands, as an offset in the text before the edit: the hunks move it as an
+    /// anchor biased right, `Diff::map(caret, Bias::Right)`.
     pub caret: ByteOffset,
 }
 
 impl ListEdit {
-    /// `hunks`, the caret where they move `caret`, an offset in the text before them, as an
-    /// anchor biased right.
     fn new(hunks: Vec<Hunk>, caret: usize) -> Self {
-        let diff = Diff::new(Version::default(), hunks);
-        let caret = diff.map(ByteOffset::new(caret), Bias::Right);
         Self {
-            hunks: diff.hunks().to_vec(),
-            caret,
+            hunks,
+            caret: ByteOffset::new(caret),
         }
     }
 

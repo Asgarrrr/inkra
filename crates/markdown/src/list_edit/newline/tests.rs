@@ -1,10 +1,10 @@
 //! `↩` per rule, each case written `text` with `|` for the caret (list editing spec, D2, D3, D8).
 
-use inkra_text::{ByteOffset, Hunk};
+use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
 
 use super::continue_list;
-use crate::parse;
 use crate::structure::FALLBACKS;
+use crate::{ListEdit, parse};
 
 pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
     let mut out = text.to_owned();
@@ -14,13 +14,20 @@ pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
     out
 }
 
+/// `text` with `edit` applied, and where its caret lands in it.
+pub(super) fn edited(text: &str, edit: &ListEdit) -> (String, usize) {
+    let diff = Diff::new(Version::default(), edit.hunks.clone());
+    let caret = diff.map(edit.caret, Bias::Right).get();
+    (apply(text, diff.hunks()), caret)
+}
+
 /// `case`'s text after `↩` at its `|`, with `|` at the caret; `None` for the plain key.
 fn enter(case: &str) -> Option<String> {
     let caret = case.find('|').expect("a caret");
     let text = case.replacen('|', "", 1);
     let edit = continue_list(&text, &parse(&text), ByteOffset::new(caret))?;
-    let mut out = apply(&text, &edit.hunks);
-    out.insert(edit.caret.get(), '|');
+    let (mut out, caret) = edited(&text, &edit);
+    out.insert(caret, '|');
     Some(out)
 }
 

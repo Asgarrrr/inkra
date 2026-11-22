@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use gpui::{Context, Window};
-use inkra_text::Diff;
+use inkra_text::{Bias, Diff};
 
 use super::Newline;
 use crate::editor::EditorView;
@@ -35,6 +35,7 @@ impl EditorView {
             Some((diff, caret)) => {
                 // The new parse snaps the caret in `refresh`; the old one would read old atoms.
                 if state.apply_diff(buffer, &diff) {
+                    let caret = diff.map(caret, Bias::Right);
                     state.move_to(buffer, caret, false, inkra_editor::no_snap);
                 }
             }

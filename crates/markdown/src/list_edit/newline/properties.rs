@@ -7,11 +7,11 @@ mod skips;
 
 use std::ops::Range;
 
-use inkra_text::{ByteOffset, Diff, Hunk, Version};
+use inkra_text::{ByteOffset, Hunk};
 use proptest::prelude::*;
 
 use super::continue_list;
-use super::tests::apply;
+use super::tests::edited;
 use crate::spans::{line_end, line_start};
 use crate::{ListEdit, Markdown, parse};
 use oracle::{containers, oracle, shape};
@@ -120,9 +120,8 @@ fn continued(
     markdown: &Markdown,
     caret: usize,
     edit: &ListEdit,
-    new: &str,
+    (new, at): (&str, usize),
 ) -> Result<(), TestCaseError> {
-    let at = edit.caret.get();
     let parsed = parse(new);
     let new_line = ByteOffset::new(line_start(new, at));
     let item = parsed
@@ -189,16 +188,10 @@ fn check(text: &str, caret: usize) -> Result<(), TestCaseError> {
     let exits = matches!(&edit.hunks[..], [hunk]
         if hunk.text.is_empty() && text.as_bytes()[hunk.range.start.get()] == b'>');
     prop_assume!(!exits || line_end(text, caret) == text.len());
-    // Disjoint and in order, or this panics.
-    let _ = Diff::new(Version::default(), edit.hunks.clone());
-    let new = apply(text, &edit.hunks);
+    // Disjoint and in order, or `edited` panics.
+    let (new, landed) = edited(text, &edit);
     prop_assume!(!blank_under_empty_marker(text, &markdown, caret, &new));
-    prop_assert!(
-        edit.caret.get() <= new.len(),
-        "caret {} past {:?}",
-        edit.caret.get(),
-        new
-    );
+    prop_assert!(landed <= new.len(), "caret {} past {:?}", landed, new);
 
     intended_structure(text, caret, &edit, &new)?;
     // P0: when `↩` adds a line, every other line keeps its quotes and the count of items holding
@@ -242,7 +235,7 @@ fn check(text: &str, caret: usize) -> Result<(), TestCaseError> {
         );
     }
     if past_text_at_end(text, &markdown, caret) {
-        continued(text, &markdown, caret, &edit, &new)?;
+        continued(text, &markdown, caret, &edit, (&new, landed))?;
     }
     Ok(())
 }
