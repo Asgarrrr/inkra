@@ -220,10 +220,10 @@ fn has_previous_sibling(markdown: &Markdown, at: usize) -> bool {
         if items[above].list == items[at].list {
             return true;
         }
-        if items[at].parent.map(|parent| parent as usize) == Some(above) {
+        if items[at].parent() == Some(above) {
             return false;
         }
-        walk = items[above].parent.map(|parent| parent as usize);
+        walk = items[above].parent();
     }
     false
 }

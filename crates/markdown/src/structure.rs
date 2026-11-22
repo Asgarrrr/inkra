@@ -31,10 +31,18 @@ pub struct Item {
     /// Its range's end without its last line ending: its block holds the lines that start before
     /// it.
     pub end: ByteOffset,
-    /// Its parent item's index in `Structure::items`; `None` for a top-level item.
-    pub parent: Option<u32>,
+    /// Its parent item's index in `Structure::items`, as `u32` to keep `Item` at 32 bytes.
+    parent: Option<u32>,
     /// Its list: the index of its `Start(List)` among the note's lists, in document order.
     pub list: u32,
+}
+
+impl Item {
+    /// Its parent item's index in `Structure::items`; `None` for a top-level item.
+    #[must_use]
+    pub fn parent(&self) -> Option<usize> {
+        self.parent.map(|parent| parent as usize)
+    }
 }
 
 /// Fills a `Structure` from the parse's events, one call per element it opens.
@@ -62,8 +70,12 @@ impl Collector {
                 let marker = marker_start(text, range.start);
                 close(&mut self.items, marker);
                 close(&mut self.lists, marker);
-                // Every item but the last takes two bytes, so only a note past 8 GiB saturates.
-                let index = u32::try_from(self.structure.items.len()).unwrap_or(u32::MAX);
+                #[expect(
+                    clippy::expect_used,
+                    reason = "every item but the last takes two bytes: 2^32 items need 8 GiB"
+                )]
+                let index = u32::try_from(self.structure.items.len())
+                    .expect("a note holds fewer than 2^32 items");
                 self.structure.items.push(Item {
                     marker: ByteOffset::new(marker),
                     end: ByteOffset::new(without_line_ending(text, range).end),

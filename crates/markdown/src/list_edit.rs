@@ -166,7 +166,7 @@ fn holder(text: &str, markdown: &Markdown, line: usize) -> Option<usize> {
         if items[at].end.get() > line && is_gutter_item(text, markdown, at) {
             return Some(at);
         }
-        at = items[at].parent? as usize;
+        at = items[at].parent()?;
     }
 }
 
