@@ -7,12 +7,12 @@ mod skips;
 
 use std::ops::Range;
 
-use inkra_text::{Bias, ByteOffset, Diff, Hunk, Version};
+use inkra_text::{ByteOffset, Hunk};
 use proptest::prelude::*;
 
 use super::continue_list;
-use super::tests::edited;
 use crate::spans::{line_end, line_start};
+use crate::testing::{edited, landing};
 use crate::{ListEdit, Markdown, parse};
 use oracle::{containers, oracle, shape};
 use skips::{blank_under_empty_marker, splits_opener, unheld_quoted_code};
@@ -27,12 +27,6 @@ fn inserted_newlines(hunks: &[Hunk]) -> Vec<usize> {
         grown += hunk.text.len().cast_signed() - (hunk.range.end - hunk.range.start).cast_signed();
     }
     out
-}
-
-/// Where `at` lands once `edit` applies.
-fn landing(edit: &ListEdit, at: usize) -> usize {
-    let diff = Diff::new(Version::default(), edit.hunks.clone());
-    diff.map(ByteOffset::new(at), Bias::Right).get()
 }
 
 /// The caret's line is a marker line, the caret at its end right past text (D2, rule 6).

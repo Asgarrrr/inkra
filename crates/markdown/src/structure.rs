@@ -33,8 +33,8 @@ pub struct Item {
     pub end: ByteOffset,
     /// Its parent item's index in `Structure::items`, as `u32` to keep `Item` at 32 bytes.
     parent: Option<u32>,
-    /// Its list: the index of its `Start(List)` among the note's lists, in document order.
-    pub list: u32,
+    /// Its list's index, as `u32` for the same reason.
+    list: u32,
 }
 
 impl Item {
@@ -42,6 +42,12 @@ impl Item {
     #[must_use]
     pub fn parent(&self) -> Option<usize> {
         self.parent.map(|parent| parent as usize)
+    }
+
+    /// Its list: the index of its `Start(List)` among the note's lists, in document order.
+    #[must_use]
+    pub fn list(&self) -> usize {
+        self.list as usize
     }
 }
 

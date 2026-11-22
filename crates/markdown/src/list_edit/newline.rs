@@ -185,7 +185,7 @@ fn has_previous_sibling(markdown: &Markdown, at: usize) -> bool {
     let items = &markdown.structure.items;
     let mut walk = at.checked_sub(1);
     while let Some(above) = walk {
-        if items[above].list == items[at].list {
+        if items[above].list() == items[at].list() {
             return true;
         }
         if items[at].parent() == Some(above) {
