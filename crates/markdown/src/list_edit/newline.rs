@@ -118,12 +118,31 @@ fn on_marker_line(
         let prefix = container_prefix(text, markdown, line.range.start, column);
         return ListEdit::replace(typed_end..caret, format!("\n{prefix}"));
     }
-    let rest_blank = line.is_blank_past(text, caret);
-    match (typed_end > line.text_start(), rest_blank) {
-        (false, true) if held(text, markdown, line, item).next().is_none() => leave(line),
-        (false, false) => above(text, markdown, line, item, caret),
-        _ => continued(text, markdown, line, item, typed_end..caret),
+    let text_before = typed_end > line.text_start();
+    let gesture = if text_before {
+        Gesture::Continue
+    } else if !line.is_blank_past(text, caret) {
+        Gesture::Above
+    } else if held(text, markdown, line, item).next().is_some() {
+        Gesture::Continue
+    } else {
+        Gesture::Leave
+    };
+    match gesture {
+        Gesture::Leave => leave(line),
+        Gesture::Above => above(text, markdown, line, item, caret),
+        Gesture::Continue => continued(text, markdown, line, item, typed_end..caret),
     }
+}
+
+/// What `↩` does on a marker line at or past its text start.
+enum Gesture {
+    /// An empty item that holds no line leaves its list (D3).
+    Leave,
+    /// At the text start of an item with text, a line goes above it (rule 7).
+    Above,
+    /// Past an item's text, or on an empty marker line that holds lines, the next sibling (rule 6).
+    Continue,
 }
 
 /// The next sibling, in place of `cut` and the blanks after it (D2, rule 6, D7).
