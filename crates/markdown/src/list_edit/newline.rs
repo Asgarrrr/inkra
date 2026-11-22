@@ -9,7 +9,7 @@ use inkra_text::ByteOffset;
 use super::shift::shifted;
 use super::{Line, ListEdit, blanks, container_prefix, content_column, holder, hunk};
 use crate::Markdown;
-use crate::items::{Content, Marker, MarkerKind, marker_end};
+use crate::items::{Content, Marker, MarkerKind, column_after, marker_end};
 use crate::spans::{first_from, last_before};
 use crate::structure::Fallback;
 
@@ -139,17 +139,17 @@ fn continued(
 ) -> ListEdit {
     let empty = line.is_blank_past(text, cut.end);
     let cut = cut.start..cut.end + blanks(&text[cut.end..line.range.end]);
-    let (continuation, marker) = continuation(text, markdown, line, item, 1);
-    let column = Marker::at(&continuation, 0, marker).content_column;
+    let sibling = continuation(text, markdown, line, item, 1);
+    let column = sibling.content_column;
     let shift = column.saturating_sub(content_column(text, markdown, item));
-    let mut moved = moved(text, markdown, line, item, shift);
-    let first = moved.next();
+    let mut held = held(text, markdown, line, item);
+    let first = held.next();
     // An item begins with one blank line at most, so an empty new one goes past them.
     let past_blanks = first
         .as_ref()
         .map(|held| held.range.start - 1)
         .filter(|&at| empty && at > line.range.end);
-    let inserted = format!("\n{continuation}");
+    let inserted = format!("\n{}", sibling.line);
     let (mut hunks, landing) = match past_blanks {
         Some(at) => {
             let gone = (!cut.is_empty()).then(|| hunk(cut, String::new()));
@@ -163,21 +163,11 @@ fn continued(
     // An empty new line opens no paragraph for a lazy line right below to continue.
     let lazy = |held: &Line<'_>| held.lazy_prefix(text, markdown, column).filter(|_| empty);
     hunks.extend(first.and_then(|held| lazy(&held).or_else(|| shifted(&held, text, shift))));
-    hunks.extend(moved.filter_map(|held| shifted(&held, text, shift)));
+    // Only a shift moves the lines past the first, so only a shift reads them (D7).
+    if shift > 0 {
+        hunks.extend(held.filter_map(|held| shifted(&held, text, shift)));
+    }
     ListEdit::new(hunks, landing)
-}
-
-/// The lines item `item` holds below `line` that a sibling continuing it can move: all of them
-/// under a `shift`, else the first, which only a lazy prefix moves (D7).
-fn moved<'t, 'm>(
-    text: &'t str,
-    markdown: &'m Markdown,
-    line: &Line<'m>,
-    item: usize,
-    shift: usize,
-) -> impl Iterator<Item = Line<'m>> + use<'t, 'm> {
-    let reach = if shift == 0 { 1 } else { usize::MAX };
-    held(text, markdown, line, item).take(reach)
 }
 
 /// The lines item `item` holds below `line`, blank ones left out.
@@ -198,7 +188,7 @@ fn held<'t, 'm>(
 fn above(text: &str, markdown: &Markdown, line: &Line<'_>, item: usize, caret: usize) -> ListEdit {
     let start = line.range.start;
     let inserted = if has_previous_sibling(markdown, item) {
-        format!("{}\n", continuation(text, markdown, line, item, 0).0)
+        format!("{}\n", continuation(text, markdown, line, item, 0).line)
     } else {
         format!("{}\n", &text[start..line.trimmed_quote_end(text)])
     };
@@ -222,18 +212,22 @@ fn has_previous_sibling(markdown: &Markdown, at: usize) -> bool {
     false
 }
 
-/// The marker line of a sibling of item `at`, numbered `step` past it, and its marker's offset in
-/// it (D2, rule 6).
+/// A sibling's marker line: its text, and the column its content starts at.
+struct Continuation {
+    line: String,
+    content_column: usize,
+}
+
+/// The marker line of a sibling of item `at`, numbered `step` past it (D2, rule 6).
 fn continuation(
     text: &str,
     markdown: &Markdown,
     line: &Line<'_>,
     at: usize,
     step: u64,
-) -> (String, usize) {
+) -> Continuation {
     let at = markdown.structure.items[at].marker.get();
     let mut out = container_prefix(text, markdown, line.range.start, line.column(text, at));
-    let offset = out.len();
     let marker = Marker::at(text, line.range.start, at);
     let number = match &marker.kind {
         MarkerKind::Number { digits } => text[digits.clone()]
@@ -253,10 +247,13 @@ fn continuation(
         }
         None => out.push_str(&text[at..marker.end]),
     }
-    match &marker.content {
-        Content::Blanks(blanks) => out.push_str(&text[blanks.clone()]),
-        Content::Empty | Content::Indented => out.push(' '),
-    }
+    let blanks = match &marker.content {
+        Content::Blanks(blanks) => &text[blanks.clone()],
+        Content::Empty | Content::Indented => " ",
+    };
+    let after = column_after(0, out.as_bytes());
+    let (_, content_column) = Content::read(after, out.len(), blanks.as_bytes());
+    out.push_str(blanks);
     let task = line
         .gutter
         .and_then(|gutter| gutter.item.as_ref())
@@ -264,7 +261,10 @@ fn continuation(
     if task.is_some() {
         out.push_str("[ ] ");
     }
-    (out, offset)
+    Continuation {
+        line: out,
+        content_column,
+    }
 }
 
 /// `\n` and the container prefix to `column`, in place of the blanks before `caret` (D2, rules 2

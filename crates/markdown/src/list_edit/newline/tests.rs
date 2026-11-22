@@ -2,8 +2,7 @@
 
 use inkra_text::{ByteOffset, Hunk};
 
-use super::{FALLBACKS, continue_list, moved};
-use crate::list_edit::Line;
+use super::{FALLBACKS, continue_list};
 use crate::parse;
 
 pub(super) fn apply(text: &str, hunks: &[Hunk]) -> String {
@@ -346,27 +345,6 @@ fn a_marker_in_a_skipped_range_takes_the_plain_key() {
 #[test]
 fn indented_code_on_a_marker_line_opens_a_line_at_the_item_text() {
     check(&[("-     code|", "-     code\n  |")]);
-}
-
-/// With no width shift, the walk over the lines the new item takes stops at the first one.
-#[test]
-fn a_continuation_with_no_shift_moves_one_line() {
-    let moved_lines = |text: &str, shift| {
-        let markdown = parse(text);
-        moved(text, &markdown, &Line::at(text, &markdown, 0), 0, shift).count()
-    };
-    for text in [
-        "- a\n  b\n  c\n  d\n  e",
-        "- a\nb\nc\nd",
-        "- a\n  - b\n  - c\n  - d",
-    ] {
-        assert_eq!(moved_lines(text, 0), 1, "{text:?}");
-    }
-    assert_eq!(
-        moved_lines("9. a\n   b\n   c", 1),
-        2,
-        "a shift moves every line"
-    );
 }
 
 /// No `↩` parses the note; the fallback reads the caret's line once at most.
