@@ -9,3 +9,4 @@ cc a5b32daa193f467c5d52f58398ceccd1709fedbc37800f71fab4c2f56cacfeff # shrinks to
 cc 0b11e23f416007752a3468c67ce52db052d543dbcfa42b72b403f7326dd5efe7 # shrinks to (text, at) = ("- a\n  - a\n  10. \n\n      a", 17), end = Index(4099276460824344804)
 cc cf609dcfbcc02115810028d051c67b35ec9d04eb9ee6dd1b11ef11e8b878b9e9 # shrinks to (text, at) = ("- \n  10. \n\n      a\n      a", 10), end = Index(2170205185142300191)
 cc 8a964df95cbf83daa6f0555d037b6ec298c6784d26690b7be3d61a2791ecee07 # shrinks to (text, at) = ("- a\n  1) a\n  9. a", 10), end = Index(4611686018427387904)
+cc 47280eea3b93b85b870dc11cbff2b35778e85c4998c51068d3eca5ce4d0feb17 # shrinks to (text, at) = ("1. a\n\n   1. a\n   a\n   1. a\n1. a", 26), end = Index(6148914691236517206)

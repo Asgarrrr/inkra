@@ -158,7 +158,9 @@ pub(super) fn indented(text: &str, items: &[Read], at: usize) -> Option<Vec<Read
 /// Whether only blank lines follow `child`'s block in `parent`'s.
 fn ends_block(text: &str, items: &[Read], child: usize, parent: usize) -> bool {
     let end = items[parent].end.min(text.len());
-    text[items[child].end.min(end)..end]
+    // An item an earlier step nested under `child` ends past `child`'s own, older end.
+    let child_end = subtree(items, child).fold(0, |far, at| far.max(items[at].end));
+    text[child_end.min(end)..end]
         .trim_matches([' ', '\t', '\n', '>'])
         .is_empty()
 }
