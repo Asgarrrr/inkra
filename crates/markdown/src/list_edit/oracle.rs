@@ -102,7 +102,7 @@ pub(super) fn containers(text: &str, line: usize) -> (usize, usize) {
 }
 
 /// A list no item of the old text is in.
-const FRESH: usize = usize::MAX;
+pub(super) const FRESH: usize = usize::MAX;
 
 /// The item a command acts on for the line starting at `line`: the innermost gutter item opening
 /// on it, else the innermost holding it.
@@ -132,7 +132,7 @@ pub(super) fn previous_sibling(items: &[Read], at: usize) -> Option<usize> {
 }
 
 /// `at` and its descendants, as indices.
-fn subtree(items: &[Read], at: usize) -> Range<usize> {
+pub(super) fn subtree(items: &[Read], at: usize) -> Range<usize> {
     let depth = items[at].depth;
     let count = items[at + 1..]
         .iter()

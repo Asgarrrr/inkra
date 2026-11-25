@@ -74,7 +74,7 @@ pub fn cycle_tasks(text: &str, markdown: &Markdown, selection: Range<ByteOffset>
 /// The lines `selection` touches, each without its newline: the first, then every line starting
 /// before the selection's end (H). Skipped lines go, a range's end included, and blank lines when
 /// there are several.
-fn cycled_lines(
+pub(crate) fn cycled_lines(
     text: &str,
     skipped: &[Range<ByteOffset>],
     selection: &Range<ByteOffset>,

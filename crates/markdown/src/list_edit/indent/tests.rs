@@ -327,3 +327,13 @@ fn shift_tab_on_a_selection_over_two_runs_moves_each_once() {
         "- a\n  - x\n    - y\n  - b\n  - c",
     )]);
 }
+
+/// Over several lines, a blank line gives no item, as `⌘L` reads it: its holder does not move.
+#[test]
+fn a_selection_over_several_lines_skips_its_blank_lines() {
+    shift_tab(&[("- a\n  - |b\n\n  - c|", "- a\n- b\n\n- c")]);
+    tab(&[(
+        "- a\n  - x\n  - |b\n\n  - c|",
+        "- a\n  - x\n    - b\n\n    - c",
+    )]);
+}

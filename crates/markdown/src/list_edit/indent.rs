@@ -9,8 +9,9 @@ use inkra_text::ByteOffset;
 use super::shift::Moves;
 use super::{Doc, Empty, Kind, Line, ListEdit};
 use crate::Markdown;
+use crate::cycle::cycled_lines;
 use crate::items::Content;
-use crate::spans::{line_ranges, line_start};
+use crate::spans::line_start;
 
 /// The edit `⇥` makes on the items `selection` touches, or `None` when it touches none; with no
 /// hunks, none can move. Its caret is the selection's end: the app maps the selection (D9).
@@ -68,21 +69,20 @@ struct Touched<'a> {
 
 impl<'a> Touched<'a> {
     fn read(doc: Doc<'a>, selection: &Range<ByteOffset>) -> Option<Self> {
-        let first = line_start(doc.text, selection.start.get());
-        let end = selection.end.get();
         let mut items = Vec::new();
         let mut fallbacks = Vec::new();
-        for range in
-            line_ranges(doc.text, first).take_while(|line| line.start == first || line.start < end)
-        {
+        for range in cycled_lines(doc.text, &doc.markdown.structure.skipped, selection) {
             let line = doc.line(range);
             if let Some(item) = line.item() {
                 items.push(item);
-            } else if line.in_code() {
-            } else if let Some(empty) = line.empty_fallback() {
-                fallbacks.push((line, empty));
-            } else {
-                items.extend(line.holder());
+                continue;
+            }
+            if line.in_code() {
+                continue;
+            }
+            match line.empty_fallback() {
+                Some(empty) => fallbacks.push((line, empty)),
+                None => items.extend(line.holder()),
             }
         }
         if items.is_empty() && fallbacks.is_empty() {
@@ -296,3 +296,6 @@ mod tests;
 
 #[cfg(test)]
 mod properties;
+
+#[cfg(test)]
+mod selections;
