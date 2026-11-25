@@ -317,18 +317,19 @@ fn shift_tab_keeps_the_adopted_siblings_kind() {
     ]);
 }
 
-/// A line already at the column it would move to takes no hunk.
+/// A line already at the column it would move to takes no hunk, a quoted lazy line included.
 #[test]
 fn shift_tab_writes_no_hunk_that_changes_nothing() {
-    let text = "- a\n  - b\nlazy";
-    let edit = outdent_items(text, &parse(text), at(9)..at(9)).expect("an item");
-    assert!(
-        edit.hunks
-            .iter()
-            .all(|hunk| text[hunk.range.start.get()..hunk.range.end.get()] != hunk.text),
-        "{:?}",
-        edit.hunks
-    );
+    for (text, caret) in [("- a\n  - b\nlazy", 9), ("> - a\n>   - b\n> lazy", 13)] {
+        let edit = outdent_items(text, &parse(text), at(caret)..at(caret)).expect("an item");
+        assert!(
+            edit.hunks
+                .iter()
+                .all(|hunk| text[hunk.range.start.get()..hunk.range.end.get()] != hunk.text),
+            "{text:?} gave {:?}",
+            edit.hunks
+        );
+    }
 }
 
 /// Runs under one parent each move once, and the later one counts on from the earlier one.
