@@ -774,16 +774,20 @@ markdown mutants on the diff (CLAUDE.md, Commands).
      too, and restarts at `1`: under the outdented item's paragraph, a list past `1` would read as
      text. `- a\n  - b|\n  9. c` gives `- a\n- b\n  1. c`. With a blank line above, it moves with
      the rest of the block and keeps its numbers.
-  4. **The adopted siblings join the outdented item's last child list** when that list ends the
-     item's block and only blank lines lie between it and them, as `⇥`'s run joins (D4): they take
-     its kind and continue its numbers. `- a\n  - b|\n    * x\n  - c` gives
-     `- a\n- b\n  * x\n  * c`. Else they keep their kind and renumber from `1`.
-  5. **Padding.** A restart and an adopted renumbering write `1`, `2`, and so on unpadded; a join
-     pads to the last child's digit count, so `01. x` is followed by `02.`. D6 decides the rest in L4.
+  4. **Reversed by the owner** (decision 1 below). It made the adopted siblings join the outdented
+     item's last child list, in its kind; they now keep their own.
+  5. **Padding.** A restart and an adopted renumbering write `1`, `2`, and so on unpadded; `⇥`'s
+     join pads to the last child's digit count, so `01. x` is followed by `02.`. D6 decides the rest
+     in L4.
   6. **The width shift reads the written marker.** An item's new content column counts from its new
      marker's end over the blanks already after it, so a tab there counts its columns anew (D7).
   7. **The caret after `⌘Z` on `⇧⇥` whose lowest hunk is a marker rewrite** snaps past the item
      part, to the text start: `1. a\n   - b|` with `⇧⇥`, then `⌘Z`, puts it at 9, not 8 (D9).
+- 2026-11-25: the owner decided L2's open points.
+  1. **The adopted siblings keep their own kind**, as D4 reads literally: they shift, and an ordered
+     run restarts at `1`. `- a\n  - b|\n    1. x\n  - c\n  - d` with `⇧⇥` gives
+     `- a\n- b\n  1. x\n  - c\n  - d`: `c` and `d` stay bullets, a list of their own right after
+     `x`'s. Amendment 4 is reversed; amendment 3 holds, its list restarting at `1` in its own kind.
 
 ## Deviations
 

@@ -277,22 +277,25 @@ fn shift_tab_restarts_a_child_list_right_below_at_one() {
     ]);
 }
 
-/// Under a child list that ends the outdented item's block, the adopted siblings join it.
+/// The adopted siblings keep their own kind under the outdented item's children; an ordered run
+/// restarts at 1 (owner decision, 2026-11-25).
 #[test]
-fn shift_tab_joins_the_adopted_siblings_to_the_items_children() {
+fn shift_tab_keeps_the_adopted_siblings_kind() {
     shift_tab(&[
-        ("- a\n  - b|\n    * x\n  - c", "- a\n- b|\n  * x\n  * c"),
+        ("- a\n  - b|\n    * x\n  - c", "- a\n- b|\n  * x\n  - c"),
         (
             "- a\n  - b|\n    1. x\n  - c\n  - d",
-            "- a\n- b|\n  1. x\n  2. c\n  3. d",
+            "- a\n- b|\n  1. x\n  - c\n  - d",
         ),
-        ("- a\n  - b|\n    1) x\n  1) c", "- a\n- b|\n  1) x\n  2) c"),
+        (
+            "- a\n  - b|\n    - x\n  3) c\n  4) d",
+            "- a\n- b|\n  - x\n  1) c\n  2) d",
+        ),
+        (
+            "- a\n  - b|\n    1. x\n\n  p\n  1. c",
+            "- a\n- b|\n  1. x\n\n  p\n  1. c",
+        ),
     ]);
-    // A paragraph between keeps them a list of their own.
-    shift_tab(&[(
-        "- a\n  - b|\n    1. x\n\n  p\n  1. c",
-        "- a\n- b|\n  1. x\n\n  p\n  1. c",
-    )]);
 }
 
 /// A line already at the column it would move to takes no hunk.

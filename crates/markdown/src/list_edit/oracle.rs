@@ -173,9 +173,9 @@ fn last_child(text: &str, items: &[Read], at: usize) -> Option<usize> {
 }
 
 /// The items `⇧⇥` means for `at`: it and its descendants one level up in its parent's list. The
-/// siblings below it, or a list of its parent's right below it, become its children: in the list
-/// its children end its block with, else in a list of their own (D4, amendments 3 and 4). `None`
-/// when it has no parent.
+/// siblings below it, or a list of its parent's right below it, become its children, each list
+/// with its own kind (D4, amendment 3, the owner's decision of 2026-11-25). `None` when it has no
+/// parent.
 pub(super) fn outdented(text: &str, items: &[Read], at: usize) -> Option<Vec<Read>> {
     let parent = parent(items, at)?;
     let mut want = items.to_vec();
@@ -185,14 +185,6 @@ pub(super) fn outdented(text: &str, items: &[Read], at: usize) -> Option<Vec<Rea
     }
     want[at].list = items[parent].list;
     let below = subtree.end;
-    let next_to = items.get(below).is_none_or(|item| {
-        text[items[at].end.min(item.marker)..line_start(text, item.marker)]
-            .trim_matches([' ', '\t', '\n', '>'])
-            .is_empty()
-    });
-    let joined = last_child(text, items, at)
-        .filter(|_| next_to)
-        .map(|child| items[child].list);
     let list = items.get(below).and_then(|item| {
         let line = line_start(text, item.marker);
         let right_below = !text[line_start(text, line.saturating_sub(1))..line]
@@ -201,13 +193,13 @@ pub(super) fn outdented(text: &str, items: &[Read], at: usize) -> Option<Vec<Rea
         (item.depth == items[at].depth && (item.list == items[at].list || right_below))
             .then_some(item.list)
     });
-    for item in &mut want[below..] {
-        if list == Some(item.list) {
-            item.list = joined.unwrap_or(if item.list == items[at].list {
-                FRESH
-            } else {
-                item.list
-            });
+    // Its own siblings below start a list of their own; a list of its parent's keeps its own.
+    if list == Some(items[at].list) {
+        for item in want[below..]
+            .iter_mut()
+            .filter(|item| item.list == items[at].list)
+        {
+            item.list = FRESH;
         }
     }
     // Two of its child lists, one right after the other and of one kind, merge, as any two do.

@@ -193,27 +193,16 @@ pub(super) fn outdent_run(
             && (item.list() == items[last].list() || !doc.line_at(line - 1).is_blank())
     });
     if adopted {
-        // Under a child list that ends its block, with nothing between, they join it, as `⇥`'s
-        // run does (amendment 4).
-        let next_to = doc
-            .line_at(items[last].end.get())
-            .below()
-            .take_while(|line| line.range.start < line_start(doc.text, marker(below)))
-            .all(|line| line.is_blank());
-        let joined = doc
-            .last_child(last)
-            .filter(|&child| next_to && ends_block(doc, child, last))
-            .map(|child| Kind::at(doc.text, marker(child)));
-        adopt(doc, below..next.unwrap_or(items.len()), by, joined, moves);
+        adopt(doc, below..next.unwrap_or(items.len()), by, moves);
     }
     Some((parent, step))
 }
 
 /// The list from `siblings.start` on, before `siblings.end`, which the rest of its old parent's
-/// block moved by `by`: in the list
-/// `joined` continues, else renumbered from 1 while its numbers ran in sequence, since a list that
-/// starts past 1 cannot interrupt the paragraph of the item now above it (D4, D6).
-fn adopt(doc: Doc<'_>, siblings: Range<usize>, by: isize, joined: Option<Kind>, moves: &mut Moves) {
+/// block moved by `by`: it keeps its kind, and an ordered run renumbers from 1 while its numbers
+/// ran in sequence, since a list that starts past 1 cannot interrupt the paragraph of the item now
+/// above it (D4, D6).
+fn adopt(doc: Doc<'_>, siblings: Range<usize>, by: isize, moves: &mut Moves) {
     let items = &doc.markdown.structure.items;
     let mut sibling = Some(siblings.start);
     let mut next = None;
@@ -221,20 +210,17 @@ fn adopt(doc: Doc<'_>, siblings: Range<usize>, by: isize, joined: Option<Kind>, 
         let Some(at) = sibling.filter(|at| siblings.contains(at)) else {
             return;
         };
-        let marker = match (joined, Kind::at(doc.text, items[at].marker.get())) {
-            (Some(kind), _) => kind.nth(step + 1),
-            (
-                None,
-                Kind::Number {
-                    value, delimiter, ..
-                },
-            ) if next.is_none_or(|next| value == next) => {
-                next = Some(value + 1);
-                Kind::first(delimiter).nth(step)
-            }
-            _ => return,
+        let Kind::Number {
+            value, delimiter, ..
+        } = Kind::at(doc.text, items[at].marker.get())
+        else {
+            return;
         };
-        let (_, shift) = rewrite(doc, at, by, marker, moves);
+        if next.is_some_and(|next| value != next) {
+            return;
+        }
+        next = Some(value + 1);
+        let (_, shift) = rewrite(doc, at, by, Kind::first(delimiter).nth(step), moves);
         moves.lines(doc.line_at(items[at].marker.get()).held(at), shift - by);
         sibling = doc.next_sibling(at);
     }
