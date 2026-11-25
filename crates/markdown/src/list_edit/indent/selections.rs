@@ -138,8 +138,7 @@ fn check(indent: bool, text: &str, at: usize, end: Index) -> Result<(), TestCase
         line.contains('>') && line.trim_matches([' ', '\t', '>']).is_empty()
     }));
     let (items, _) = oracle(text);
-    // An empty item holds nothing past a blank line, so what the note writes there reads otherwise
-    // (Known limits).
+    // An empty item holds nothing past a blank line, yet `caret_item` gives it the lines there.
     prop_assume!(!(0..items.len()).any(|at| empty_above_blank(text, &items, at)));
     let touched = touched(text, &items, &lines);
     let selection = ByteOffset::new(at)..ByteOffset::new(end);

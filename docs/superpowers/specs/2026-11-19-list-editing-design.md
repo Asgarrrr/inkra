@@ -400,6 +400,9 @@ run's parent.
 - A run whose first item has no previous sibling does not move. Nothing else is written: a first
   item cannot become a child (decision 7). In `> - a\n\n- b`, `b` is the first of its list, so `⇥`
   writes nothing; a shift there made indented code.
+- A run whose previous sibling is an empty item above a blank line does not move either, as decision
+  7 reads it: the parse ends that item at the blank line, so it can hold no child. `- a\n- \n\n- c|`
+  and `- a\n- [ ] \n\n- c|` with `⇥` write nothing (owner decision, 2026-11-25).
 - `⇥` on an empty fallback item writes nothing: its marker already sits where the parse will read
   a child once text arrives.
 
@@ -790,6 +793,8 @@ markdown mutants on the diff (CLAUDE.md, Commands).
      `x`'s. Amendment 4 is reversed; amendment 3 holds, its list restarting at `1` in its own kind.
   2. **Amendment 1 stands as written**: `⇧⇥` on an item on its parent's marker line writes
      nothing, and `↩` on such an empty item deletes its marker alone.
+  3. **`⇥` under an empty item above a blank line writes nothing**, as on a first item (decision 7,
+     D4). It replaces that case's Known limit.
 
 ## Deviations
 
@@ -832,11 +837,12 @@ generator never writes the last two.
 - A sibling of `999999999.` is numbered `1000000000.`, which `CommonMark` (9 digits at most) reads
   as text. Found by the final L1 verification; no note reaches it by hand.
 
-Accepted by L2 (2026-11-25). The `⇥`, `⇧⇥` and `↩` properties skip both.
+Accepted by L2 (2026-11-25). The `⇧⇥` and `↩` properties skip the first; the `⇥`, `⇧⇥` and `↩`
+properties skip the second.
 
-- An empty item above a blank line holds nothing past it: the parse ends it there. So `⇥` under
-  such an item, `⇧⇥` that would make it adopt siblings, and D3's nested `↩` on it leave the lines
-  past the blank line outside it.
+- An empty item above a blank line holds nothing past it: the parse ends it there. So `⇧⇥` that
+  would make it adopt siblings, and D3's nested `↩` on it, leave the lines past the blank line
+  outside it. `⇥` under it writes nothing (D4).
 - A tab right after a moved descendant's marker can count fewer columns once its block shifts:
   only the markers a command rewrites read their blanks anew (amendment 6).
 

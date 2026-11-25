@@ -109,9 +109,13 @@ impl<'a> Touched<'a> {
 }
 
 /// `⇥` on a run: its first item's previous sibling becomes its parent. Its markers land on that
-/// sibling's content column, and join the list its last child ends its block with (D4).
+/// sibling's content column, and join the list its last child ends its block with (D4). An empty
+/// sibling above a blank line ends there and holds no child, so nothing moves (owner decision).
 fn indent_run(doc: Doc<'_>, run: &[usize], moves: &mut Moves) {
-    let Some(parent) = doc.previous_sibling(run[0]) else {
+    let Some(parent) = doc
+        .previous_sibling(run[0])
+        .filter(|&above| !ends_at_blank(doc, above))
+    else {
         return;
     };
     let by = doc.content_column(parent).cast_signed() - doc.marker_column(run[0]).cast_signed();
@@ -129,6 +133,14 @@ fn indent_run(doc: Doc<'_>, run: &[usize], moves: &mut Moves) {
         };
         shift_item(doc, at, by, marker, moves);
     }
+}
+
+/// Whether item `at` is empty and a blank line follows its marker line: its block ends there.
+fn ends_at_blank(doc: Doc<'_>, at: usize) -> bool {
+    let line = doc.line_at(doc.markdown.structure.items[at].marker.get());
+    line.item() == Some(at)
+        && line.is_blank_past(line.text_start())
+        && line.below().next().is_some_and(|below| below.is_blank())
 }
 
 /// Whether only blank lines follow `child`'s block in `parent`'s, so a run placed after it joins

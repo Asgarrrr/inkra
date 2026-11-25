@@ -78,10 +78,10 @@ fn indents(text: &str, at: usize) -> Result<(), TestCaseError> {
         );
         return Ok(());
     };
-    let want = indented(text, &items, item);
-    // An empty item above a blank line cannot hold the run (Known limits).
+    // An empty item above a blank line holds no child: nothing moves (owner decision, 2026-11-25).
     let above = previous_sibling(&items, item);
-    prop_assume!(!above.is_some_and(|above| empty_above_blank(text, &items, above)));
+    let want = indented(text, &items, item)
+        .filter(|_| !above.is_some_and(|above| empty_above_blank(text, &items, above)));
     // A first child cannot interrupt its parent's paragraph while empty (Risks).
     let joins = want
         .as_ref()
@@ -162,12 +162,9 @@ fn round_trip(text: &str, at: usize) -> Result<(), TestCaseError> {
     else {
         return Ok(());
     };
-    // An empty first child reads as no item until typed (Risks), so `⇧⇥` leaves its block behind;
-    // an empty item above a blank line holds no child (Known limits).
+    // An empty first child reads as no item until typed (Risks), so `⇧⇥` leaves its block behind.
     let item = caret_item(text, &items, line_start(text, at));
     prop_assume!(!item.is_some_and(|item| is_empty_item(text, &items, item)));
-    let above = item.and_then(|item| previous_sibling(&items, item));
-    prop_assume!(!above.is_some_and(|above| empty_above_blank(text, &items, above)));
     let (indented, landed) = edited(text, &edit);
     let back = outdent_items(&indented, &parse(&indented), caret(landed));
     let back = back.map(|back| apply(&indented, &back.hunks));

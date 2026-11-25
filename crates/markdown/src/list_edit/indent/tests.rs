@@ -111,6 +111,25 @@ fn tab_on_a_first_item_writes_nothing() {
     }
 }
 
+/// An empty item above a blank line ends there and cannot hold a child: nothing is written, as on
+/// a first item (owner decision, 2026-11-25). With no blank line between, it holds one.
+#[test]
+fn tab_under_an_empty_item_above_a_blank_line_writes_nothing() {
+    for case in [
+        "- a\n- \n\n- c|",
+        "- a\n- [ ] \n\n- c|",
+        "> - \n>\n> - c|",
+        "1. \n\n2. c|",
+    ] {
+        assert_eq!(run(indent_items, case), Some(case.to_owned()), "{case:?}");
+    }
+    tab(&[
+        ("- a\n- \n\n- |c\n- d|", "- a\n- \n\n- c\n- d"),
+        ("- \n- c|", "- \n  - c|"),
+        ("- \n- [ ] c|", "- \n  - [ ] c|"),
+    ]);
+}
+
 /// The run joins the new parent's last child list, its kind and its numbers; else a bullet keeps
 /// its byte and a number restarts at 1.
 #[test]
