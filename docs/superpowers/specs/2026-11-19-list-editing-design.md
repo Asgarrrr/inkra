@@ -760,6 +760,29 @@ markdown mutants on the diff (CLAUDE.md, Commands).
   The handler moved to `editor/actions/lists.rs` for the line ceiling, `Item::end` drops its last
   line ending, the stale-parse check runs before `continue_list`, and four cases became Known
   limits.
+- 2026-11-25: L2. Its properties against pulldown-cmark found cases the decisions leave open, now
+  numbered amendments; code comments cite them by number. `Marker` no longer carries its kind: the
+  commands read it from the text (`list_edit/kind.rs`).
+  1. **An item on its parent's marker line**, as `b` in `- - b`, has no blanks of its own to cut:
+     `⇧⇥` writes nothing. `↩` on such an empty item deletes its marker alone, so the parent stays,
+     empty: `- - |` gives `- |`, and `> 1. - |` gives `> 1. |`.
+  2. **`⇥` joins the last child's list only when that list ends the new parent's block**: only blank
+     lines follow it there. After a paragraph, as in `- a\n  * x\n\n  p\n- b`, the run starts a
+     list of its own: a bullet keeps its byte, a number restarts at `1`.
+  3. **A child list of the parent right below the run**, with no blank line above it, is adopted
+     too, and restarts at `1`: under the outdented item's paragraph, a list past `1` would read as
+     text. `- a\n  - b|\n  9. c` gives `- a\n- b\n  1. c`. With a blank line above, it moves with
+     the rest of the block and keeps its numbers.
+  4. **The adopted siblings join the outdented item's last child list** when that list ends the
+     item's block and only blank lines lie between it and them, as `⇥`'s run joins (D4): they take
+     its kind and continue its numbers. `- a\n  - b|\n    * x\n  - c` gives
+     `- a\n- b\n  * x\n  * c`. Else they keep their kind and renumber from `1`.
+  5. **Padding.** A restart and an adopted renumbering write `1`, `2`, and so on unpadded; a join
+     pads to the last child's digit count, so `01. x` is followed by `02.`. D6 decides the rest in L4.
+  6. **The width shift reads the written marker.** An item's new content column counts from its new
+     marker's end over the blanks already after it, so a tab there counts its columns anew (D7).
+  7. **The caret after `⌘Z` on `⇧⇥` whose lowest hunk is a marker rewrite** snaps past the item
+     part, to the text start: `1. a\n   - b|` with `⇧⇥`, then `⌘Z`, puts it at 9, not 8 (D9).
 
 ## Deviations
 
@@ -798,11 +821,17 @@ generator never writes the last two.
 - Quoted indented code that no item holds loses its code indent under rule 2: the parse records a
   leaf text start only while a list is open (task boxes spec, D11), so `>     x|` gives
   `>     x\n> |`, a paragraph line after the code.
-- In L1, `↩` on a nested empty item on the same line as its parent, `- - |`, deletes the whole item
-  part, the parent's marker included. L2's D3 nested case replaces it.
 - Rule 3 fires on an indented code block that opens on a marker line (D2, rule 3).
 - A sibling of `999999999.` is numbered `1000000000.`, which `CommonMark` (9 digits at most) reads
   as text. Found by the final L1 verification; no note reaches it by hand.
+
+Accepted by L2 (2026-11-25). The `⇥`, `⇧⇥` and `↩` properties skip both.
+
+- An empty item above a blank line holds nothing past it: the parse ends it there. So `⇥` under
+  such an item, `⇧⇥` that would make it adopt siblings, and D3's nested `↩` on it leave the lines
+  past the blank line outside it.
+- A tab right after a moved descendant's marker can count fewer columns once its block shifts:
+  only the markers a command rewrites read their blanks anew (amendment 6).
 
 ## Deferred
 
