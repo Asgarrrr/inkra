@@ -764,7 +764,7 @@ markdown mutants on the diff (CLAUDE.md, Commands).
 - 2026-11-25: L2. Its properties against pulldown-cmark found cases the decisions leave open, now
   numbered amendments; code comments cite them by number. `Marker` no longer carries its kind: the
   commands read it from the text (`list_edit/kind.rs`).
-  1. **An item on its parent's marker line**, as `b` in `- - b`, has no blanks of its own to cut:
+  1. **An item on its parent's marker line** (owner-approved, decision 2 below), as `b` in `- - b`, has no blanks of its own to cut:
      `⇧⇥` writes nothing. `↩` on such an empty item deletes its marker alone, so the parent stays,
      empty: `- - |` gives `- |`, and `> 1. - |` gives `> 1. |`.
   2. **`⇥` joins the last child's list only when that list ends the new parent's block**: only blank
@@ -788,6 +788,8 @@ markdown mutants on the diff (CLAUDE.md, Commands).
      run restarts at `1`. `- a\n  - b|\n    1. x\n  - c\n  - d` with `⇧⇥` gives
      `- a\n- b\n  1. x\n  - c\n  - d`: `c` and `d` stay bullets, a list of their own right after
      `x`'s. Amendment 4 is reversed; amendment 3 holds, its list restarting at `1` in its own kind.
+  2. **Amendment 1 stands as written**: `⇧⇥` on an item on its parent's marker line writes
+     nothing, and `↩` on such an empty item deletes its marker alone.
 
 ## Deviations
 
