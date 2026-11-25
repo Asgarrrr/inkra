@@ -40,6 +40,9 @@ fn cmd_z_undoes_enter_in_one_step(cx: &mut TestAppContext) {
         ("para\n- abc", 7, "para\n\n- abc", 8, 5),
         // D3 at the top level: where it was.
         ("- a\n- ", 6, "- a\n", 4, 6),
+        // D3 nested: after the restored blanks, or the restored marker when its kind changed.
+        ("- a\n  - b\n  - ", 14, "- a\n  - b\n- ", 12, 12),
+        ("1. a\n   - b\n   - ", 17, "1. a\n   - b\n2. ", 15, 16),
         // Rule 2 at the text start.
         ("- a\n  b", 6, "- a\n\n  b", 7, 6),
     ] {
