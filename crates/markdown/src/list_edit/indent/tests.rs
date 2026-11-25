@@ -308,3 +308,22 @@ fn shift_tab_writes_no_hunk_that_changes_nothing() {
         edit.hunks
     );
 }
+
+/// Runs under one parent each move once, and the later one counts on from the earlier one.
+#[test]
+fn shift_tab_on_a_selection_over_two_runs_moves_each_once() {
+    shift_tab(&[
+        (
+            "- a\n  - b\n    - |c\n      - k\n    1. x|",
+            "- a\n  - b\n  - c\n    - k\n  - x",
+        ),
+        (
+            "- a\n\n  9. b\n     - |c\n     * x|",
+            "- a\n\n  9. b\n  10. c\n  11. x",
+        ),
+    ]);
+    tab(&[(
+        "- a\n  - x\n  - |y\n- b\n- c|",
+        "- a\n  - x\n    - y\n  - b\n  - c",
+    )]);
+}

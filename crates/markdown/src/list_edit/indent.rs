@@ -36,8 +36,9 @@ pub fn outdent_items(
     selection: Range<ByteOffset>,
 ) -> Option<ListEdit> {
     edit(Doc { text, markdown }, selection, |doc, touched, moves| {
+        let mut counted = None;
         for run in touched.runs(doc) {
-            outdent_run(doc, run, moves);
+            counted = outdent_run(doc, run, &touched.items, counted, moves);
         }
         for (line, empty) in &touched.fallbacks {
             outdent_fallback(line, empty, moves);
@@ -143,26 +144,42 @@ fn ends_block(doc: Doc<'_>, child: usize, parent: usize) -> bool {
 
 /// `⇧⇥` on a run: its items become siblings of their parent in place, with its kind. The rest of
 /// the parent's block follows the last one at its content column, and the siblings there become
-/// its children (D4).
-pub(super) fn outdent_run(doc: Doc<'_>, run: &[usize], moves: &mut Moves) {
+/// its children (D4). A later touched sibling moves on its own, so the rest stops at its block.
+/// `counted` is the parent the run before outdented beside and the step it reached; returns this
+/// run's.
+pub(super) fn outdent_run(
+    doc: Doc<'_>,
+    run: &[usize],
+    touched: &[usize],
+    counted: Option<(usize, u64)>,
+    moves: &mut Moves,
+) -> Option<(usize, u64)> {
     let items = &doc.markdown.structure.items;
-    let Some(parent) = items[run[0]].parent() else {
-        return;
-    };
+    let parent = items[run[0]].parent()?;
     let marker = |at: usize| items[at].marker.get();
     // On its parent's marker line, an item has no blanks of its own to cut (amendment 1).
     if line_start(doc.text, marker(run[0])) == line_start(doc.text, marker(parent)) {
-        return;
+        return counted;
     }
     let by = doc.marker_column(parent).cast_signed() - doc.marker_column(run[0]).cast_signed();
     let kind = Kind::at(doc.text, marker(parent));
+    let mut step = counted
+        .filter(|&(at, _)| at == parent)
+        .map_or(1, |(_, step)| step);
     let mut column = 0;
-    for (step, &at) in (1..).zip(run) {
+    for &at in run {
         column = shift_item(doc, at, by, kind.nth(step), moves);
+        step += 1;
     }
     let last = run[run.len() - 1];
     let by = column.cast_signed() - doc.content_column(parent).cast_signed();
-    let end = items[parent].end.get();
+    let next = touched
+        .iter()
+        .copied()
+        .find(|&at| at > last && items[at].parent() == Some(parent));
+    let end = next.map_or(items[parent].end.get(), |at| {
+        line_start(doc.text, marker(at))
+    });
     let rest = doc
         .line_at(items[last].end.get())
         .below()
@@ -187,19 +204,21 @@ pub(super) fn outdent_run(doc: Doc<'_>, run: &[usize], moves: &mut Moves) {
             .last_child(last)
             .filter(|&child| next_to && ends_block(doc, child, last))
             .map(|child| Kind::at(doc.text, marker(child)));
-        adopt(doc, below, by, joined, moves);
+        adopt(doc, below..next.unwrap_or(items.len()), by, joined, moves);
     }
+    Some((parent, step))
 }
 
-/// The list from `first` on, which the rest of its old parent's block moved by `by`: in the list
+/// The list from `siblings.start` on, before `siblings.end`, which the rest of its old parent's
+/// block moved by `by`: in the list
 /// `joined` continues, else renumbered from 1 while its numbers ran in sequence, since a list that
 /// starts past 1 cannot interrupt the paragraph of the item now above it (D4, D6).
-fn adopt(doc: Doc<'_>, first: usize, by: isize, joined: Option<Kind>, moves: &mut Moves) {
+fn adopt(doc: Doc<'_>, siblings: Range<usize>, by: isize, joined: Option<Kind>, moves: &mut Moves) {
     let items = &doc.markdown.structure.items;
-    let mut sibling = Some(first);
+    let mut sibling = Some(siblings.start);
     let mut next = None;
     for step in 0.. {
-        let Some(at) = sibling else {
+        let Some(at) = sibling.filter(|at| siblings.contains(at)) else {
             return;
         };
         let marker = match (joined, Kind::at(doc.text, items[at].marker.get())) {

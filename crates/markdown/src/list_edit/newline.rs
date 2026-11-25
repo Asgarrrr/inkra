@@ -114,7 +114,7 @@ fn exit(line: &Line<'_>, item: usize) -> ListEdit {
         return ListEdit::replace(marker..line.range.end, String::new());
     }
     let mut moves = Moves::default();
-    outdent_run(doc, &[item], &mut moves);
+    outdent_run(doc, &[item], &[item], None, &mut moves);
     ListEdit::new(moves.hunks(doc), line.text_start())
 }
 
