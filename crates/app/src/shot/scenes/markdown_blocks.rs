@@ -121,7 +121,7 @@ fn lists_end(stage: &mut Stage) -> WindowHandle<AppShell> {
     window
 }
 
-pub(super) const SCENES: [Scene; 9] = [
+pub(super) const SCENES: [Scene; 13] = [
     Scene {
         name: "markdown-blocks",
         shows: "quotes: bars per level, every row at the gutter's edge, a lazy line, a heading and a list in a quote; tasks open, done, nested by spaces and by a tab, ordered, after a bullet, after a number, quoted with a lazy line under its text, and wrapped, beside a plain bullet: each task's box in a slot where the bullet's `•` is, on its first row, a slot's gap before its text, and its text in the bullet's text column; under the open task a nested task and a nested bullet, their box and `•` under the open task's text; an ordered task's number in its slot then its box, a task after a bullet its `•` then its box; open a grey outline, done an accent fill with a check and its text struck and dimmed on every row, the nested open task under it unstruck, none on the lazy line; the last ordered task, the caret on its number, reads raw `2. [ ] ` ending at its text, which stays in the ordered task's text column",
@@ -167,6 +167,26 @@ pub(super) const SCENES: [Scene; 9] = [
         shows: "`9. a` over a child `- c`, then enter: an empty `10.` between them, `9.` and `10.` on one number column, the child's `•` still under the new item's text",
         open: wider,
     },
+    Scene {
+        name: "list-tab-nests",
+        shows: "`- a` over `- b`, then tab on `b`: its `•` one slot right, under `a`'s text, the caret after `b`",
+        open: nests,
+    },
+    Scene {
+        name: "list-tab-ordered",
+        shows: "`1. a` over `2. b`, then tab on `b`: a `1.` under `a`'s text, the caret after `b`",
+        open: nests_ordered,
+    },
+    Scene {
+        name: "list-shift-tab-adopts",
+        shows: "`- a` over `1. b`, `2. c` and `3. d` nested, then shift-tab on `b`: `b`'s `•` under `a`'s, `c` and `d` renumbered `1.` and `2.` under `b`'s text",
+        open: adopts,
+    },
+    Scene {
+        name: "list-enter-nested",
+        shows: "`- a` over `- b` and an empty nested item, then enter: the empty item's `•` one level up, under `a`'s, the caret right of it",
+        open: unnests,
+    },
 ];
 
 /// `note` with `keys` pressed in it, focused.
@@ -195,4 +215,24 @@ fn leaves(stage: &mut Stage) -> WindowHandle<AppShell> {
 
 fn wider(stage: &mut Stage) -> WindowHandle<AppShell> {
     typed(stage, "9. a\n   - c", "cmd-up end enter")
+}
+
+fn nests(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "- a\n- b", "cmd-down tab")
+}
+
+fn nests_ordered(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "1. a\n2. b", "cmd-down tab")
+}
+
+fn adopts(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(
+        stage,
+        "- a\n  1. b\n  2. c\n  3. d",
+        "cmd-up down end shift-tab",
+    )
+}
+
+fn unnests(stage: &mut Stage) -> WindowHandle<AppShell> {
+    typed(stage, "- a\n  - b\n  - ", "cmd-down enter")
 }

@@ -126,6 +126,8 @@ test_package = ["inkra-text", "inkra-editor", "inkra-markdown", "inkra-index", "
 # above `at`, and stops: the same `None` as the loop that never ran.
 #
 # Matched by column. Equivalent. `by == 0` makes no `NonZeroUsize`, so the guard never sees it.
+#
+# Unobservable. A scene's opener runs only from the `shot` example, which no test runs.
 exclude_re = [
     "^crates/text/src/anchor\\.rs:[0-9]+:44: replace > with >= in transform$",
     "^crates/markdown/src/cmark\\.rs:[0-9]+:[0-9]+: replace \\| with \\^ in options$",
@@ -168,4 +170,5 @@ exclude_re = [
     "^crates/markdown/src/list_edit/indent\\.rs:[0-9]+:64: replace < with <= in outdent_run$",
     "^crates/markdown/src/list_edit\\.rs:[0-9]+:20: replace > with >= in Doc<'a>::last_child$",
     "^crates/markdown/src/list_edit/shift\\.rs:[0-9]+:37: replace > with >= in Moves::hunks$",
+    "^crates/app/src/shot/scenes/markdown_blocks\\.rs:[0-9]+:[0-9]+: replace (nests|nests_ordered|adopts|unnests) -> WindowHandle<AppShell> with "
 ]
