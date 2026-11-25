@@ -20,9 +20,12 @@ enum Row {
     Code(usize),
 }
 
-fn row() -> impl Strategy<Value = Row> {
+/// Every marker the notes use.
+const MARKERS: [&str; 8] = ["-", "*", "1.", "9.", "10.", "99.", "1)", "123)"];
+
+fn row(markers: &[&'static str]) -> impl Strategy<Value = Row> {
     let text = prop::sample::select(vec!["a", "b c", ""]);
-    let marker = prop::sample::select(vec!["-", "*", "1.", "9.", "10.", "99.", "1)", "123)"]);
+    let marker = prop::sample::select(markers.to_vec());
     let task = prop::sample::select(vec!["", "", "[ ] ", "[x] "]);
     prop_oneof![
         4 => (0..4usize, marker, task, text.clone())
@@ -89,8 +92,17 @@ fn note(rows: &[Row], quotes: usize, tabs: bool) -> (String, Vec<usize>) {
 /// chosen byte. A marker that cannot interrupt a paragraph, or a sibling indented under an empty
 /// item, reads as other than written; such a note is rejected.
 pub(super) fn case() -> impl Strategy<Value = (String, usize)> {
+    case_of(&MARKERS)
+}
+
+/// A note as `case` makes them, with bullet lists alone.
+pub(super) fn bullet_case() -> impl Strategy<Value = (String, usize)> {
+    case_of(&MARKERS[..2])
+}
+
+fn case_of(markers: &[&'static str]) -> impl Strategy<Value = (String, usize)> {
     (
-        prop::collection::vec(row(), 1..8),
+        prop::collection::vec(row(markers), 1..8),
         0..3usize,
         any::<bool>(),
         any::<prop::sample::Index>(),

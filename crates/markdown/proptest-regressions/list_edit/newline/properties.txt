@@ -17,3 +17,6 @@ cc d765d66d60b2165f5da51b23bb4a3d050fd0e6b02bf1f4f25366f60ac71380cc # shrinks to
 cc 21b688f295852015783ce3599dde302d47bb6af6ee5d12ba17c925eb3484ce3a # shrinks to (text, caret) = ("- b c\n  - a", 3)
 cc 67a1211be4fab21318778156fc2b5fee00b489d7c790cd8aa8bb665b54111213 # shrinks to (text, caret) = ("- a\n- \n\n  - a", 6)
 cc 4a6f588d72825aff612bd6cb0a07acd0ece84f56b37955120ff9352c35d62e3a # shrinks to (text, caret) = ("> 10. \n>\n>     ```\n>     x\n>     ```\n> 9. a\n> - a\n> - a", 22)
+cc 27de06877948f71e68548989e284a5aa2127171166afa5a4d659c7d114d5e58c # shrinks to (text, caret) = ("- \n  - ", 7)
+cc e167ffe9c613e31d33bf1cf59950aec8bcebf45cedec8bd3ddedf8a80132d73d # shrinks to (text, caret) = ("- a\n  - [ ] \n\n  - a", 12)
+cc 429957b22c78f2a2373b05d83b23fb225252469fe6baf059ae2a876cedc19f9a # shrinks to (text, caret) = ("9. \n   1. \n\n   1. a\n- a\n  ```\n  x\n  ```\n- a", 10)

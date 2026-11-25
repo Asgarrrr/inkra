@@ -1,0 +1,17 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f27c53137d408bc4c51131f1388a4c8f08fe5ccab167277a16daeae72e69f708 # shrinks to (text, at) = ("- a\n  - a\n  a\n  a\n  9. a\n- a", 4)
+cc e898f433637112bfd775bda9a00c61f68b74d10acf3bcfd249f190d9feec05e5 # shrinks to (text, at) = ("* a\n* \n  - a", 4)
+cc b5c060d0a89abf6074a05e3d17e2597b18b0293a57d70c31c0d5f9ec6a895c8a # shrinks to (text, at) = ("- a\n  - a\n\n  - a\n\n- a", 10)
+cc 4825f70f16cb388e10250f2349a9b0f6f1c56532d5ffc7aa43831798f9b8ccc8 # shrinks to (text, at) = ("1. \n\n1. a", 5)
+cc 02a2afc4c4cd86dfbf59e9f34124ebc9e2641161a344d954c21f5256a924152e # shrinks to (text, at) = ("- \n\n- a\n  ```\n  x\n  ```", 4)
+cc ce654841bca1a2e5b6506ca4f10ccc8e436cf4c362d9d465720a44bd7966d5a7 # shrinks to (text, at) = ("- a\n- a\n- a\n  - a\n  * ", 12)
+cc 158188df8e9c99ce9c0577895b153b44247f15d4d4e25dbf613a6f202a360d12 # shrinks to (text, at) = ("\n- \n  - a\n    1) a\n  1) a", 4)
+cc 62f5aca323f8829918a721cf357fb5e5c7e218e603b03c5f97a94b2a85c4503c # shrinks to (text, at) = ("- a\n- \n  - a\n\n  - a\n- a", 13)
+cc bc833b1c7ea6bfcdcd13760854907cd93fa76c3c698d4e99080862f22ef4edfb # shrinks to (text, at) = ("- a\n  - [ ] a\n    1) [ ] \n  a\n  1) a", 4)
+cc 16811d01a9566f35812c6421651d0f2d09bf50ddde13b99b8df659c1ffac0e42 # shrinks to (text, at) = ("- a\n  - a\n    - a\n  * a", 4)
+cc eb6eb9ed6a2a2f04238612b4972f39ed0f680a581605e601ef8e8e0ee2b71996 # shrinks to (text, at) = ("- a\n  - a\n    * a\n  1. a\n  * a", 4)
