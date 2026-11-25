@@ -769,7 +769,9 @@ markdown mutants on the diff (CLAUDE.md, Commands).
   commands read it from the text (`list_edit/kind.rs`).
   1. **An item on its parent's marker line** (owner-approved, decision 2 below), as `b` in `- - b`, has no blanks of its own to cut:
      `⇧⇥` writes nothing. `↩` on such an empty item deletes its marker alone, so the parent stays,
-     empty: `- - |` gives `- |`, and `> 1. - |` gives `> 1. |`.
+     empty: `- - |` gives `- |`, and `> 1. - |` gives `> 1. |`. A run that starts on such a line
+     does not move either: `- - |y\n  - w|` with `⇧⇥` writes nothing, as `⇥` leaves a run whose
+     first item cannot move.
   2. **`⇥` joins the last child's list only when that list ends the new parent's block**: only blank
      lines follow it there. After a paragraph, as in `- a\n  * x\n\n  p\n- b`, the run starts a
      list of its own: a bullet keeps its byte, a number restarts at `1`.
@@ -837,8 +839,8 @@ generator never writes the last two.
 - A sibling of `999999999.` is numbered `1000000000.`, which `CommonMark` (9 digits at most) reads
   as text. Found by the final L1 verification; no note reaches it by hand.
 
-Accepted by L2 (2026-11-25). The `⇧⇥` and `↩` properties skip the first; the `⇥`, `⇧⇥` and `↩`
-properties skip the second.
+Accepted by L2 (2026-11-25). The `⇧⇥` and `↩` properties skip the first; the generators never
+write the second.
 
 - An empty item above a blank line holds nothing past it: the parse ends it there. So `⇧⇥` that
   would make it adopt siblings, and D3's nested `↩` on it, leave the lines past the blank line
