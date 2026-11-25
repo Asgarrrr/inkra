@@ -1,6 +1,7 @@
 # List editing: `↩`, `⇥`, `⇧⇥` and `⌫` in lists and quotes
 
-Date: 2026-11-19. Status: **proposed**, revised after a red-team review (History). No code yet.
+Date: 2026-11-19. Status: **approved**, revised after a red-team review (History). L1 is built;
+L2 is under review.
 The owner approved the scope ("chantier A") on 2026-11-19, and decided every Open question the same
 day.
 
