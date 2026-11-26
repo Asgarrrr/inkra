@@ -24,7 +24,7 @@ pub use display::{DisplayLine, DisplayOffset};
 pub use front_matter::front_matter;
 pub use gutters::{Gutter, ItemMarker, ItemPart, Task, WidthKey};
 pub use links::{Link, LinkKind, link_at, links};
-pub use list_edit::{ListEdit, continue_list};
+pub use list_edit::{ListEdit, continue_list, indent_items, outdent_items};
 pub use markup::markup;
 pub use parse::{CodeBlock, Heading, Markdown, Span, parse};
 pub use pulldown_cmark::HeadingLevel;

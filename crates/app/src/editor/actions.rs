@@ -23,6 +23,8 @@ actions!(
         DocStart,
         DocEnd,
         Newline,
+        IndentItem,
+        OutdentItem,
         Undo,
         Redo,
         FollowLink,
@@ -70,6 +72,8 @@ pub(super) fn on_actions(div: Div, cx: &mut Context<EditorView>) -> Div {
         .on_action(cx.listener(EditorView::doc_start))
         .on_action(cx.listener(EditorView::doc_end))
         .on_action(cx.listener(EditorView::newline))
+        .on_action(cx.listener(EditorView::indent_item))
+        .on_action(cx.listener(EditorView::outdent_item))
         .on_action(cx.listener(EditorView::undo))
         .on_action(cx.listener(EditorView::redo))
         .on_action(cx.listener(EditorView::follow_link))

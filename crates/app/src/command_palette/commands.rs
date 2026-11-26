@@ -26,6 +26,8 @@ pub(super) fn is_hidden(name: &str) -> bool {
         editor::DocStart::name_for_type(),
         editor::DocEnd::name_for_type(),
         editor::Newline::name_for_type(),
+        editor::IndentItem::name_for_type(),
+        editor::OutdentItem::name_for_type(),
         sidebar::SelectPrev::name_for_type(),
         sidebar::SelectNext::name_for_type(),
         field::Confirm::name_for_type(),

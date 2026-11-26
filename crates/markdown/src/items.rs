@@ -299,19 +299,13 @@ fn digits(text: &str, marker: usize) -> Range<usize> {
 
 /// An item's marker, as `CommonMark` 5.2 reads it for its content start.
 pub(crate) struct Marker {
-    pub(crate) kind: MarkerKind,
     /// Its end, past a number's delimiter.
     pub(crate) end: usize,
+    /// The blanks after it that its content start reads, five at most.
+    pub(crate) blanks: Range<usize>,
     pub(crate) content: Content,
     /// The column its content starts at, counted from the line's start.
     pub(crate) content_column: usize,
-}
-
-pub(crate) enum MarkerKind {
-    /// A `-`, `*` or `+`.
-    Bullet,
-    /// Its digits; its `.` or `)` runs from their end to the marker's end.
-    Number { digits: Range<usize> },
 }
 
 /// What follows an item's marker on its line (`CommonMark` 5.2).
@@ -328,13 +322,7 @@ impl Marker {
     /// The marker at `marker`, on the line starting at `line`.
     pub(crate) fn at(text: &str, line: usize, marker: usize) -> Self {
         let bytes = text.as_bytes();
-        let digits = digits(text, marker);
-        let end = digits.end + 1;
-        let kind = if digits.is_empty() {
-            MarkerKind::Bullet
-        } else {
-            MarkerKind::Number { digits }
-        };
+        let end = marker_end(text, marker);
         let len = bytes[end..]
             .iter()
             .take(5)
@@ -345,8 +333,8 @@ impl Marker {
         let content = Content::read(after, end, blanks);
         let content_column = Content::column(after, blanks);
         Self {
-            kind,
             end,
+            blanks: end..end + len,
             content,
             content_column,
         }

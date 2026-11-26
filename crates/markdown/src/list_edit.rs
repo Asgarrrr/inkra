@@ -5,11 +5,15 @@ use std::ops::Range;
 
 use inkra_text::{ByteOffset, Hunk};
 
-use crate::items::{Marker, column_after};
-use crate::spans::{last_before, line_end, line_ranges, line_start, to_offsets};
+use crate::items::{Marker, column_after, marker_end};
+use crate::spans::{last_before, line_end, line_ranges, line_start, to_offsets, touches};
+use crate::structure::Fallback;
 use crate::{Gutter, Markdown};
 
+pub use indent::{indent_items, outdent_items};
 pub use newline::continue_list;
+
+use kind::Kind;
 
 /// A list command's edit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,9 +80,70 @@ impl<'a> Doc<'a> {
 
     /// The column where item `at`'s content starts on its marker line (`CommonMark` 5.2).
     fn content_column(self, at: usize) -> usize {
-        let marker = self.markdown.structure.items[at].marker.get();
-        Marker::at(self.text, line_start(self.text, marker), marker).content_column
+        self.marker(at).content_column
     }
+
+    /// Item `at`'s marker as `CommonMark` reads it.
+    fn marker(self, at: usize) -> Marker {
+        let marker = self.markdown.structure.items[at].marker.get();
+        Marker::at(self.text, line_start(self.text, marker), marker)
+    }
+
+    /// The column of item `at`'s marker, counted from its line's start.
+    fn marker_column(self, at: usize) -> usize {
+        let marker = self.markdown.structure.items[at].marker.get();
+        column_after(
+            0,
+            &self.text.as_bytes()[line_start(self.text, marker)..marker],
+        )
+    }
+
+    /// The nearest item above `at` in its list, found by walking from the item before it up
+    /// through its parents to its own parent (D1).
+    fn previous_sibling(self, at: usize) -> Option<usize> {
+        let items = &self.markdown.structure.items;
+        let mut walk = at.checked_sub(1);
+        while let Some(above) = walk {
+            if items[above].list() == items[at].list() {
+                return Some(above);
+            }
+            if items[at].parent() == Some(above) {
+                return None;
+            }
+            walk = items[above].parent();
+        }
+        None
+    }
+
+    /// The first item past `at`'s block, when it is in `at`'s list: only `at`'s descendants lie
+    /// between two siblings (D1).
+    fn next_sibling(self, at: usize) -> Option<usize> {
+        let items = &self.markdown.structure.items;
+        let next = items.partition_point(|item| item.marker < items[at].end);
+        items
+            .get(next)
+            .filter(|item| item.list() == items[at].list())
+            .map(|_| next)
+    }
+
+    /// The child of `at` its block ends with: the last item of the block, walked up to `at`.
+    fn last_child(self, at: usize) -> Option<usize> {
+        let items = &self.markdown.structure.items;
+        let mut last = items.partition_point(|item| item.marker < items[at].end) - 1;
+        while last > at {
+            match items[last].parent() {
+                Some(parent) if parent == at => return Some(last),
+                parent => last = parent?,
+            }
+        }
+        None
+    }
+}
+
+/// An empty marker the fallback reads on a line where no item opens (D8).
+struct Empty {
+    marker: usize,
+    text_start: usize,
 }
 
 /// A line as the parse reads it: its range without its `\n`, and its gutter.
@@ -95,6 +160,54 @@ impl<'a> Line<'a> {
         line_ranges(doc.text, self.range.start)
             .skip(1)
             .map(move |range| doc.line(range))
+    }
+
+    /// The innermost gutter item opening on it: the last item whose marker lies in its item part.
+    fn item(&self) -> Option<usize> {
+        let gutter = self.gutter?;
+        gutter.item.as_ref().filter(|item| item.marked)?;
+        last_before(
+            &self.doc.markdown.structure.items,
+            gutter.range.end,
+            |item| item.marker,
+        )
+    }
+
+    /// The lines item `item`, opening on it, holds below it, blank ones left out.
+    fn held(&self, item: usize) -> impl Iterator<Item = Line<'a>> + use<'a> {
+        let end = self.doc.markdown.structure.items[item].end.get();
+        self.below()
+            .take_while(move |held| held.range.start < end)
+            .filter(|held| !held.is_blank())
+    }
+
+    /// Whether a code block touches it.
+    fn in_code(&self) -> bool {
+        touches(
+            &self.doc.markdown.code_blocks,
+            self.range.start..=self.range.end,
+            |block| block.range.start.get()..block.range.end.get(),
+        )
+    }
+
+    /// The empty marker the fallback reads past its quote part and leading blanks, when no item
+    /// opens on it and no code lies on it (D8).
+    fn empty_fallback(&self) -> Option<Empty> {
+        // Front matter and HTML hold no markdown marker.
+        let lines = self.range.start..=self.range.end;
+        if touches(&self.doc.markdown.structure.skipped, lines, |range| {
+            range.start.get()..range.end.get()
+        }) {
+            return None;
+        }
+        let fallback = Fallback::read(self.doc.text, &self.range, self.lead_end())?;
+        let piece = &fallback.piece;
+        let end = marker_end(piece, fallback.marker);
+        let rest = &piece[end..piece.len() - 1];
+        (blanks(rest) == rest.len()).then(|| Empty {
+            marker: fallback.in_text(fallback.marker),
+            text_start: fallback.in_text(end) + usize::from(!rest.is_empty()),
+        })
     }
 
     /// The innermost gutter item holding it: the last item whose marker lies before it, walked up
@@ -225,8 +338,14 @@ fn blanks(text: &str) -> usize {
     text.bytes().take_while(|&byte| is_blank(byte)).count()
 }
 
+mod indent;
+mod kind;
 mod newline;
 mod shift;
 
+#[cfg(test)]
+mod notes;
+#[cfg(test)]
+mod oracle;
 #[cfg(test)]
 mod tests;

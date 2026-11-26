@@ -1,20 +1,19 @@
 //! Properties of `↩` over generated notes, checked against a pulldown-cmark oracle of their own
 //! (list editing spec, Tests: P0, P1's continue half, P4, P5).
 
-mod notes;
-mod oracle;
 mod skips;
-
-use std::ops::Range;
 
 use inkra_text::{ByteOffset, Hunk};
 use proptest::prelude::*;
 
 use super::continue_list;
+use crate::list_edit::notes;
+use crate::list_edit::oracle::{
+    containers, empty_above_blank, oracle, outdented, quotes_kept, shape,
+};
 use crate::spans::{line_end, line_start};
 use crate::testing::{edited, landing};
 use crate::{ListEdit, Markdown, parse};
-use oracle::{containers, oracle, shape};
 use skips::{blank_under_empty_marker, splits_opener, unheld_quoted_code};
 
 /// Each `\n` the hunks insert, as an offset in the edited text.
@@ -50,17 +49,25 @@ fn intended_structure(
     edit: &ListEdit,
     new: &str,
 ) -> Result<(), TestCaseError> {
-    let (old_items, old_quotes) = oracle(text);
-    let (new_items, new_quotes) = oracle(new);
+    let (old_items, _) = oracle(text);
+    let (new_items, _) = oracle(new);
     let line = line_start(text, caret);
     let (old_shape, new_shape) = (shape(&old_items), shape(&new_items));
+    let fail = || TestCaseError::fail(format!("{text:?} at {caret} gave {new:?}"));
+    let index = old_items
+        .iter()
+        .rposition(|item| line_start(text, item.marker) == line);
+    // A nested empty item moves up one level, as `⇧⇥` moves it (D3).
+    let outdents = index
+        .filter(|&index| old_items[index].depth > 0)
+        .filter(|_| !edit.hunks.iter().any(|hunk| hunk.text.contains('\n')));
+    prop_assume!(!outdents.is_some_and(|index| empty_above_blank(text, &old_items, index)));
     let want = if new_shape.len() == old_shape.len() {
-        old_shape
+        outdents
+            .and_then(|index| outdented(text, &old_items, index))
+            .map_or(old_shape, |want| shape(&want))
     } else {
-        let index = old_items
-            .iter()
-            .rposition(|item| line_start(text, item.marker) == line)
-            .ok_or_else(|| TestCaseError::fail(format!("{text:?} at {caret} gave {new:?}")))?;
+        let index = index.ok_or_else(fail)?;
         let mut want = old_items.clone();
         if new_shape.len() > old_shape.len() {
             want.insert(index, old_items[index]);
@@ -75,29 +82,7 @@ fn intended_structure(
     };
     prop_assert_eq!(&new_shape, &want, "{:?} at {} gave {:?}", text, caret, new);
 
-    let deleted = |at: usize| {
-        edit.hunks
-            .iter()
-            .any(|hunk| (hunk.range.start.get()..hunk.range.end.get()).contains(&at))
-    };
-    // A quote's nesting: the quotes holding its opener, itself included.
-    let level = |quotes: &[Range<usize>], at: usize| {
-        quotes.iter().filter(|quote| quote.contains(&at)).count()
-    };
-    for quote in old_quotes.iter().filter(|quote| !deleted(quote.start)) {
-        let (to, nesting) = (landing(edit, quote.start), level(&old_quotes, quote.start));
-        prop_assert!(
-            new_quotes
-                .iter()
-                .any(|new| new.contains(&to) && level(&new_quotes, new.start) == nesting),
-            "quote at {} lost: {:?} at {} gave {:?}",
-            quote.start,
-            text,
-            caret,
-            new
-        );
-    }
-    Ok(())
+    quotes_kept(text, edit, new).map_err(|error| TestCaseError::fail(format!("{error} at {caret}")))
 }
 
 /// P4 and P1's continue half: the new line holds a gutter item, a task when the caret item was

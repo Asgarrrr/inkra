@@ -174,9 +174,8 @@ fn at_an_items_text_start_a_sibling_or_a_blank_line_goes_above() {
     ]);
 }
 
-/// Until L2, a nested empty item leaves the list as a top-level one does.
 #[test]
-fn an_empty_item_leaves_the_list() {
+fn an_empty_top_level_item_leaves_the_list() {
     check(&[
         ("- a\n- |", "- a\n|"),
         ("- |", "|"),
@@ -186,20 +185,33 @@ fn an_empty_item_leaves_the_list() {
         ("- |  ", "|"),
         ("> - |", "> |"),
         ("> - a\n> - |", "> - a\n> |"),
-        ("- a\n  - b\n  - |", "- a\n  - b\n|"),
-        ("1. a\n   - b\n   - |", "1. a\n   - b\n|"),
-        ("- a\n  - b\n    - c\n    - |", "- a\n  - b\n    - c\n|"),
         ("- a\n- |\n\npara", "- a\n|\n\npara"),
     ]);
 }
 
-/// A marker the parse reads as a setext underline or as text is still an empty item (D8).
+/// A nested empty item outdents one level, as `⇧⇥` does; a second `↩` leaves the list (D3).
 #[test]
-fn an_empty_marker_the_parse_reads_as_no_item_leaves_the_list() {
+fn an_empty_nested_item_outdents_one_level() {
     check(&[
-        ("- p\n  - |", "- p\n|"),
-        ("- p\n  * |", "- p\n|"),
-        ("1. a\n   1. |", "1. a\n|"),
+        ("- a\n  - b\n  - |", "- a\n  - b\n- |"),
+        ("- a\n  - b\n    - c\n    - |", "- a\n  - b\n    - c\n  - |"),
+        ("> - a\n>   - b\n>   - |", "> - a\n>   - b\n> - |"),
+        ("1. a\n   - b\n   - |", "1. a\n   - b\n2. |"),
+        ("- a\n  - [ ] b\n  - [ ] |", "- a\n  - [ ] b\n- [ ] |"),
+        ("- a\n  - |\n  - c", "- a\n- |\n  - c"),
+    ]);
+    // On its parent's marker line, its own marker goes, which leaves the parent empty.
+    check(&[("- - |", "- |"), ("> 1. - |", "> 1. |")]);
+}
+
+/// A marker the parse reads as a setext underline or as text is still an empty item: nested, it
+/// outdents to its holder's level with its kind; else it leaves the list (D8).
+#[test]
+fn an_empty_marker_the_parse_reads_as_no_item_outdents_or_leaves() {
+    check(&[
+        ("- p\n  - |", "- p\n- |"),
+        ("- p\n  * |", "- p\n- |"),
+        ("1. a\n   1. |", "1. a\n2. |"),
         ("para\n- |", "para\n|"),
         ("para\n-|", "para\n|"),
         ("> para\n> - |", "> para\n> |"),

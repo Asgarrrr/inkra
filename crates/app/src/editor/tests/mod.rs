@@ -30,6 +30,7 @@ mod hanging;
 mod headings;
 mod inline_marker;
 mod list_enter;
+mod list_indent;
 mod list_slots;
 mod margin;
 mod markdown;

@@ -1,6 +1,7 @@
 # List editing: `↩`, `⇥`, `⇧⇥` and `⌫` in lists and quotes
 
-Date: 2026-11-19. Status: **proposed**, revised after a red-team review (History). No code yet.
+Date: 2026-11-19. Status: **approved**, revised after a red-team review (History). L1 is built;
+L2 is under review.
 The owner approved the scope ("chantier A") on 2026-11-19, and decided every Open question the same
 day.
 
@@ -399,6 +400,9 @@ run's parent.
 - A run whose first item has no previous sibling does not move. Nothing else is written: a first
   item cannot become a child (decision 7). In `> - a\n\n- b`, `b` is the first of its list, so `⇥`
   writes nothing; a shift there made indented code.
+- A run whose previous sibling is an empty item above a blank line does not move either, as decision
+  7 reads it: the parse ends that item at the blank line, so it can hold no child. `- a\n- \n\n- c|`
+  and `- a\n- [ ] \n\n- c|` with `⇥` write nothing (owner decision, 2026-11-25).
 - `⇥` on an empty fallback item writes nothing: its marker already sits where the parse will read
   a child once text arrives.
 
@@ -760,6 +764,39 @@ markdown mutants on the diff (CLAUDE.md, Commands).
   The handler moved to `editor/actions/lists.rs` for the line ceiling, `Item::end` drops its last
   line ending, the stale-parse check runs before `continue_list`, and four cases became Known
   limits.
+- 2026-11-25: L2. Its properties against pulldown-cmark found cases the decisions leave open, now
+  numbered amendments; code comments cite them by number. `Marker` no longer carries its kind: the
+  commands read it from the text (`list_edit/kind.rs`).
+  1. **An item on its parent's marker line** (owner-approved, decision 2 below), as `b` in `- - b`, has no blanks of its own to cut:
+     `⇧⇥` writes nothing. `↩` on such an empty item deletes its marker alone, so the parent stays,
+     empty: `- - |` gives `- |`, and `> 1. - |` gives `> 1. |`. A run that starts on such a line
+     does not move either: `- - |y\n  - w|` with `⇧⇥` writes nothing, as `⇥` leaves a run whose
+     first item cannot move.
+  2. **`⇥` joins the last child's list only when that list ends the new parent's block**: only blank
+     lines follow it there. After a paragraph, as in `- a\n  * x\n\n  p\n- b`, the run starts a
+     list of its own: a bullet keeps its byte, a number restarts at `1`.
+  3. **A child list of the parent right below the run**, with no blank line above it, is adopted
+     too, and restarts at `1`: under the outdented item's paragraph, a list past `1` would read as
+     text. `- a\n  - b|\n  9. c` gives `- a\n- b\n  1. c`. With a blank line above, it moves with
+     the rest of the block and keeps its numbers.
+  4. **Reversed by the owner** (decision 1 below). It made the adopted siblings join the outdented
+     item's last child list, in its kind; they now keep their own.
+  5. **Padding.** A restart and an adopted renumbering write `1`, `2`, and so on unpadded; `⇥`'s
+     join pads to the last child's digit count, so `01. x` is followed by `02.`. D6 decides the rest
+     in L4.
+  6. **The width shift reads the written marker.** An item's new content column counts from its new
+     marker's end over the blanks already after it, so a tab there counts its columns anew (D7).
+  7. **The caret after `⌘Z` on `⇧⇥` whose lowest hunk is a marker rewrite** snaps past the item
+     part, to the text start: `1. a\n   - b|` with `⇧⇥`, then `⌘Z`, puts it at 9, not 8 (D9).
+- 2026-11-25: the owner decided L2's open points.
+  1. **The adopted siblings keep their own kind**, as D4 reads literally: they shift, and an ordered
+     run restarts at `1`. `- a\n  - b|\n    1. x\n  - c\n  - d` with `⇧⇥` gives
+     `- a\n- b\n  1. x\n  - c\n  - d`: `c` and `d` stay bullets, a list of their own right after
+     `x`'s. Amendment 4 is reversed; amendment 3 holds, its list restarting at `1` in its own kind.
+  2. **Amendment 1 stands as written**: `⇧⇥` on an item on its parent's marker line writes
+     nothing, and `↩` on such an empty item deletes its marker alone.
+  3. **`⇥` under an empty item above a blank line writes nothing**, as on a first item (decision 7,
+     D4). It replaces that case's Known limit.
 
 ## Deviations
 
@@ -798,11 +835,18 @@ generator never writes the last two.
 - Quoted indented code that no item holds loses its code indent under rule 2: the parse records a
   leaf text start only while a list is open (task boxes spec, D11), so `>     x|` gives
   `>     x\n> |`, a paragraph line after the code.
-- In L1, `↩` on a nested empty item on the same line as its parent, `- - |`, deletes the whole item
-  part, the parent's marker included. L2's D3 nested case replaces it.
 - Rule 3 fires on an indented code block that opens on a marker line (D2, rule 3).
 - A sibling of `999999999.` is numbered `1000000000.`, which `CommonMark` (9 digits at most) reads
   as text. Found by the final L1 verification; no note reaches it by hand.
+
+Accepted by L2 (2026-11-25). The `⇧⇥` and `↩` properties skip the first; the generators never
+write the second.
+
+- An empty item above a blank line holds nothing past it: the parse ends it there. So `⇧⇥` that
+  would make it adopt siblings, and D3's nested `↩` on it, leave the lines past the blank line
+  outside it. `⇥` under it writes nothing (D4).
+- A tab right after a moved descendant's marker can count fewer columns once its block shifts:
+  only the markers a command rewrites read their blanks anew (amendment 6).
 
 ## Deferred
 
